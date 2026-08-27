@@ -75,8 +75,6 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px}
 @media(max-width:900px){.grid2{grid-template-columns:1fr}}
 .chart{width:100%;display:block;overflow:visible}
-.dot{cursor:pointer}
-.dot:hover circle{stroke:var(--ink);stroke-width:1.5}
 
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden}
 .seg button{background:var(--card);color:var(--steel);border:none;border-right:1px solid var(--rule);
@@ -297,14 +295,6 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <div class="hero-note" id="hero-note"></div>
     </div>
     <div id="kpis"></div>
-  </div>
-
-  <div class="panel">
-    <div class="panel-head">
-      <h2>Cost against accuracy, one dot per team-month</h2>
-      <span class="status" id="sc-n"></span>
-    </div>
-    <div class="panel-body"><svg class="chart" id="chart-scatter"></svg></div>
   </div>
 
   <div class="grid2">
@@ -1007,7 +997,6 @@ function render(){
   markActive(); renderScope(teams, scoped);
   renderHero(pms, T, scoped);
   renderKpis(T, scoped);
-  renderScatter(teams, T);
   renderCategories(teams, T);
   renderTrend(rows, teams, T, scoped);
   renderTable(pms, teams, T, scoped);
@@ -1096,47 +1085,6 @@ function renderKpis(T, scoped){
        <div class="kpis">${cards(rev)}</div></div>
      <div class="kpi-group"><div class="kpi-label">Quality and effort</div>
        <div class="kpis">${cards(ops)}</div></div>`;
-}
-
-function renderScatter(teams, T){
-  const svg = el("chart-scatter");
-  const pts = teams.filter(t => t.true_accuracy != null && t.images > t.unpriced_images)
-                   .map(t => ({...t, cpi: t.allocated_cost/(t.images - t.unpriced_images)}));
-  el("sc-n").textContent = `${pts.length} of ${teams.length} team-months have an accuracy row`;
-  if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
-
-  const W = svg.clientWidth || 1180, H = 380, padL = 54, padR = 16, padT = 16, padB = 40;
-  const pw = W-padL-padR, ph = H-padT-padB;
-  const accs = pts.map(p => p.true_accuracy).sort((a,b)=>a-b);
-  const cpis = pts.map(p => p.cpi).sort((a,b)=>a-b);
-  const xLo = Math.max(0, Math.floor(accs[0]/5)*5 - 2), xHi = 100;
-  const yHi = cpis[Math.floor(cpis.length*0.97)] * 1.12 || 1;
-  const X = v => padL + (v-xLo)/Math.max(xHi-xLo,1e-9)*pw;
-  const Y = v => padT + ph - Math.min(v,yHi)/yHi*ph;
-  const maxImg = Math.max(...pts.map(p => p.images));
-  const midAcc = weightedAccuracy(pts) ?? 90, midCpi = T.blended;
-
-  let s = "";
-  for (let i=0; i<=4; i++){
-    const y = padT + ph*i/4;
-    s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
-       + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(yHi*(1-i/4))}</text>`;
-  }
-  for (let a=Math.ceil(xLo/10)*10; a<=100; a+=10)
-    s += `<text x="${X(a)}" y="${H-14}" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${a}%</text>`;
-  s += `<line x1="${X(midAcc)}" y1="${padT}" x2="${X(midAcc)}" y2="${padT+ph}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
-     + `<line x1="${padL}" y1="${Y(midCpi)}" x2="${W-padR}" y2="${Y(midCpi)}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
-     + `<text x="${padL+8}" y="${padT+14}" font-family="IBM Plex Sans Condensed" font-weight="700" font-size="10" letter-spacing=".1em" fill="var(--cost-high)">COSTLY AND INACCURATE</text>`;
-  s += pts.sort((a,b) => b.images - a.images).map(p => {
-    const r = 3 + Math.sqrt(p.images/maxImg)*13;
-    return `<g class="dot"><title>${esc(p.team_name)} · ${p.month_key}\n${esc(p.enterprise)}`
-      + `${p.segment?" · "+esc(p.segment):""}\n${money(p.cpi)} per image · ${pct(p.true_accuracy)} accurate`
-      + `\n${int(p.images)} images${p.vins?" · "+int(p.vins)+" VINs":""}</title>`
-      + `<circle cx="${X(p.true_accuracy)}" cy="${Y(p.cpi)}" r="${r}" `
-      + `fill="${costColor(p.cpi/(T.blended||1))}" opacity=".5"/></g>`;
-  }).join("");
-  s += `<text x="${W-padR}" y="${H-14}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">true accuracy →</text>`;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.innerHTML = s;
 }
 
 function renderCategories(teams, T){
