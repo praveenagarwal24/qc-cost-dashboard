@@ -365,6 +365,8 @@ const CONFIG = {
 const like = (list) => list
   .map(d => `LOWER(TRIM(QC)) LIKE '%@${d.replace(/^@/, "")}'`).join("\n         OR ");
 const EXCLUDED = like(CONFIG.excludeDomains);
+const INHOUSE_ON = col => CONFIG.inhouseDomains
+  .map(d => `${col} LIKE '%@${d.replace(/^@/, "")}'`).join(" OR ");
 const isInhouse = email => CONFIG.inhouseDomains
   .some(d => email.endsWith("@" + d.replace(/^@/, "")));
 
@@ -423,6 +425,7 @@ pm AS (
     COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
     s.emp_no                                                  AS emp_no,
     IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
+    IF(${INHOUSE_ON("v.qc_email")}, 'inhouse', 'os')          AS cohort,
     SAFE_DIVIDE(s.salary, NULLIF(v.month_images, 0))          AS rate
   FROM pm_volume v
   LEFT JOIN sal_email s
@@ -485,16 +488,29 @@ team AS (
     ANY_VALUE(w.Team_Name)      AS team_name,
     ANY_VALUE(w.dealer_type)    AS dealer_type,
     COUNT(DISTINCT w.qc_email)  AS people,
+    COUNT(DISTINCT IF(pm.cohort = 'inhouse', w.qc_email, NULL)) AS people_inhouse,
+    COUNT(DISTINCT IF(pm.cohort = 'os',      w.qc_email, NULL)) AS people_os,
+    -- the actual reviewers, so a filtered headcount can be a true distinct count
+    -- rather than a sum of per-rooftop counts that double-counts shared staff
+    STRING_AGG(DISTINCT w.qc_email, '|') AS reviewers,
     SUM(w.images)               AS images,
+    SUM(IF(pm.cohort = 'inhouse', w.images, 0))   AS images_inhouse,
+    SUM(IF(pm.cohort = 'os',      w.images, 0))   AS images_os,
     SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
-    ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost
+    ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost,
+    ROUND(SUM(IF(pm.cohort = 'inhouse', w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_inhouse,
+    ROUND(SUM(IF(pm.cohort = 'os',      w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_os,
+    -- hours attributed the same way cost is: share of the person's monthly output
+    ROUND(SUM(w.images * SAFE_DIVIDE(pm.month_hours, pm.month_images)), 2) AS hours_attributed
   FROM work w
   JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
   GROUP BY w.month_key, w.team_id
 )
 SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
-  t.people, t.images, t.unpriced_images, t.allocated_cost,
+  t.people, t.people_inhouse, t.people_os, t.reviewers,
+  t.images, t.images_inhouse, t.images_os, t.unpriced_images,
+  t.allocated_cost, t.cost_inhouse, t.cost_os, t.hours_attributed,
   a.segment, a.poc, a.vins, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
   r.stage, r.contracted_arr, r.live_arr, r.products, r.version, r.arr_rows
@@ -709,9 +725,16 @@ const normTeam = o => ({
   month_key:o.month_key||"", team_id:(o.team_id||"").toLowerCase(),
   team_name:o.team_name||"—", enterprise:o.enterprise||"—",
   enterprise_id:o.enterprise_id||"", dealer_type:o.dealer_type||"UNKNOWN",
-  segment:o.segment||"", poc:o.poc||"", people:num(o.people)||0,
-  images:num(o.images)||0, unpriced_images:num(o.unpriced_images)||0,
+  segment:o.segment||"", poc:o.poc||"",
+  people:num(o.people)||0,
+  people_inhouse:num(o.people_inhouse)||0, people_os:num(o.people_os)||0,
+  reviewers: o.reviewers ? o.reviewers.split("|").filter(Boolean) : [],
+  images:num(o.images)||0,
+  images_inhouse:num(o.images_inhouse)||0, images_os:num(o.images_os)||0,
+  unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
+  cost_inhouse:num(o.cost_inhouse)||0, cost_os:num(o.cost_os)||0,
+  hours_attributed:num(o.hours_attributed)||0,
   vins:num(o.vins), acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
   stage:o.stage||"", version:o.version||"", products:o.products||"",
   arr_rows:num(o.arr_rows)||0,
@@ -804,6 +827,13 @@ function sample(){
       dealer_type:r[4], segment:r[5], poc:r[6], people:2+(ri%4),
       images, unpriced_images: ri===3 ? Math.round(images*0.1) : 0,
       allocated_cost:+(images*rate).toFixed(2),
+      images_inhouse: Math.round(images*0.88), images_os: images - Math.round(images*0.88),
+      cost_inhouse:+(images*0.88*rate).toFixed(2),
+      cost_os:+(images*0.12*rate).toFixed(2),
+      hours_attributed:+(images/47).toFixed(2),
+      people_inhouse:2+(ri%3), people_os:(ri%2),
+      reviewers:["adarsh.singh@spyne.co.in","ajay.prajapati@spyne.co.in",
+                 "rafil.khan@spyne.co.in","bestakkikumar@gmail.com"].slice(0, 2+(ri%3)),
       stage: ["Live","Live","Live","Onboarding","Churned"][ri%5],
       version: ri%3 ? "v2" : "v1",
       products: [["image","inventory"],["threeSixty","image","inventory"],
@@ -933,11 +963,21 @@ function totals(pms, teams, scoped){
     rooftops: new Set(teams.map(t => t.team_id)).size };
 
   if (scoped){
-    const cost = teams.reduce((a,t) => a + t.allocated_cost, 0);
-    const priced = teams.reduce((a,t) => a + (t.images - t.unpriced_images), 0);
-    return {...base, cost, pricedImages:priced, costInhouse:null, costOs:null,
-      images: teams.reduce((a,t) => a + t.images, 0),
-      hours:null, heads:null, headsInhouse:null, headsOs:null,
+    /* Everything here is the filtered team rows only, so a card never mixes a
+       filtered numerator with an unfiltered denominator. Headcount is a distinct
+       count across the slice, which is why it can't be summed across rows. */
+    const sum = k => teams.reduce((a,t) => a + (t[k]||0), 0);
+    const cost = sum("allocated_cost");
+    const priced = sum("images") - sum("unpriced_images");
+    const hours = sum("hours_attributed");
+    const who = new Set();
+    for (const t of teams) for (const e of t.reviewers) who.add(e);
+    const inh = [...who].filter(isInhouse).length;
+    return {...base, cost, pricedImages:priced,
+      costInhouse: sum("cost_inhouse"), costOs: sum("cost_os"),
+      imagesInhouse: sum("images_inhouse"), imagesOs: sum("images_os"),
+      images: sum("images"), hours,
+      heads: who.size, headsInhouse: inh, headsOs: who.size - inh,
       blended: priced ? cost/priced : 0 };
   }
   const cost = pms.reduce((a,p) => a + p.cost, 0);
@@ -992,7 +1032,7 @@ function renderScope(teams, scoped){
   if (f.ver)   bits.push(`version <b>${esc(f.ver)}</b>`);
   el("scope-note").innerHTML = `<div class="scoped">Scoped to ${bits.join(", ")} — `
     + `${int(new Set(teams.map(t=>t.team_id)).size)} rooftops, ${int(teams.length)} team-months. `
-    + `Hours and per-person figures aren't account-scoped, so they're hidden.</div>`;
+    + `Every figure below counts only the reviewers who logged work here.</div>`;
 }
 
 function renderHero(pms, T, scoped){
@@ -1002,7 +1042,8 @@ function renderHero(pms, T, scoped){
 
   if (scoped){
     el("hero-note").textContent =
-      "Cost per image for the selected accounts, from delivery cost divided by priced images.";
+      "Only reviewers who logged work on the selected accounts are counted, and only "
+      + "the share of their month spent on those accounts.";
     return;
   }
   const unpriced = T.images - T.pricedImages;
@@ -1018,11 +1059,9 @@ function renderKpis(T, scoped){
     ? dec(part/T.cost*100) + "% of delivery" : "";
   const cost = [
     ["Delivery cost", money(T.cost), "inhouse + OS, allocated"],
-    ["Inhouse cost", T.costInhouse == null ? "—" : money(T.costInhouse),
-      T.costInhouse == null ? "not split when scoped"
-        : `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${share(T.costInhouse)}`],
-    ["OS cost", T.costOs == null ? "—" : money(T.costOs),
-      T.costOs == null ? "not split when scoped" : `outsourced · ${share(T.costOs)}`],
+    ["Inhouse cost", money(T.costInhouse),
+      `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${share(T.costInhouse)}`],
+    ["OS cost", money(T.costOs), `outsourced · ${share(T.costOs)}`],
     ["Total images", int(T.images), "delivered in view"],
     ["Total VINs", T.vins ? int(T.vins) : "—", "team-months with accuracy"],
     ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
@@ -1042,9 +1081,9 @@ function renderKpis(T, scoped){
     ["True accuracy", pct(T.accuracy), "image-weighted"],
     ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
   ];
-  if (!scoped) ops.push(
+  ops.push(
     ["QC people", int(T.heads), `${int(T.headsInhouse)} inhouse · ${int(T.headsOs)} OS`],
-    ["Hours", int(T.hours), "distinct working hours"],
+    ["Hours", int(T.hours), scoped ? "attributed by output share" : "distinct working hours"],
     ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"]);
 
   const cards = list => list.map(([l,v,d]) =>
