@@ -3,1151 +3,995 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>QC Cost &amp; Output — Spyne Delivery</title>
+<title>QC Cost, Output &amp; Accuracy — Spyne Delivery Ops</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#0F2027; --ink2:#33474F; --muted:#6B8189; --faint:#9DAFB4;
-  --paper:#F2F5F3; --surface:#FFFFFF; --rule:#D7DFDC; --soft:#EBF0EE;
-  --vol:#0E6B62; --vol-2:#3E948B; --vol-tint:#DCEBE8;
-  --cost:#A15C07; --cost-2:#C98A2E; --cost-tint:#F5E9D6;
-  --warn:#9F2E22; --warn-tint:#F6E2DE;
-  --r:3px;
-  --disp:'Archivo',system-ui,sans-serif;
-  --body:'IBM Plex Sans',system-ui,sans-serif;
-  --mono:'IBM Plex Mono',ui-monospace,monospace;
+  --ink:#10151c; --steel:#5b6878; --steel-light:#8b97a5;
+  --paper:#eef1f5; --card:#fff; --rule:#dbe1e9; --rule-soft:#eaeef3;
+  --cost-low:#0e7c66; --cost-mid:#5b6878; --cost-high:#9e1b32;
+  --warn-bg:#fdf4e7; --warn-ink:#8a5a11; --warn-rule:#e8d3ac;
+  --pad:20px; --radius:3px;
 }
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
-body{background:var(--paper);color:var(--ink);font-family:var(--body);font-size:14px;line-height:1.45;-webkit-font-smoothing:antialiased}
-.wrap{max-width:1440px;margin:0 auto;padding:0 20px 72px}
-button{font:inherit;color:inherit;cursor:pointer}
-a{color:var(--vol)}
-:focus-visible{outline:2px solid var(--vol);outline-offset:2px}
+body{background:var(--paper);color:var(--ink);
+  font-family:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+  font-size:14px;line-height:1.5;-webkit-font-smoothing:antialiased}
+.num{font-family:"IBM Plex Mono",ui-monospace,monospace;font-variant-numeric:tabular-nums}
+.eyebrow{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--steel-light)}
+h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
+.wrap{max-width:1240px;margin:0 auto;padding:24px 20px 64px}
 
-/* ---------- top bar ---------- */
-.top{position:sticky;top:0;z-index:60;background:var(--ink);color:#E7EEEC}
-.top-in{max-width:1440px;margin:0 auto;padding:11px 20px;display:flex;align-items:center;gap:18px}
-.mark{font-family:var(--disp);font-weight:700;font-size:15px;letter-spacing:-.015em}
-.mark span{color:var(--vol-2)}
-.top-meta{font-family:var(--mono);font-size:11px;color:#8FA8A3;margin-left:auto;display:flex;align-items:center;gap:14px}
-.who{display:flex;align-items:center;gap:8px;background:rgba(255,255,255,.07);padding:4px 10px 4px 4px;border-radius:99px}
-.who img{width:22px;height:22px;border-radius:99px;display:block}
-.who b{font-family:var(--body);font-weight:500;font-size:12px;color:#E7EEEC}
-.ghost{background:transparent;border:1px solid rgba(255,255,255,.22);color:#E7EEEC;padding:5px 11px;border-radius:var(--r);font-size:12px}
-.ghost:hover{background:rgba(255,255,255,.1)}
+.topbar{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+.topbar h1{font-size:26px;letter-spacing:-.01em;line-height:1.1}
+.topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
+.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--card);
+  border:1px solid var(--rule);border-radius:var(--radius);padding:7px 9px}
+select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:1px}
+button{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:12px;
+  letter-spacing:.06em;text-transform:uppercase;background:var(--ink);color:#fff;
+  border:1px solid var(--ink);border-radius:var(--radius);padding:8px 14px;cursor:pointer}
+button.ghost{background:transparent;color:var(--ink)}
+button:hover{opacity:.85}
+button[disabled]{opacity:.4;cursor:not-allowed}
 
-.banner{background:var(--cost-tint);border-bottom:1px solid #E2D2B4;color:#6E4205;font-size:12.5px}
-.banner div{max-width:1440px;margin:0 auto;padding:7px 20px;display:flex;gap:8px;align-items:center}
-.banner b{font-family:var(--mono);font-weight:600}
+.panel{background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);margin-bottom:14px}
+.panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
+  padding:11px var(--pad);border-bottom:1px solid var(--rule-soft)}
+.panel-head h2{font-size:13px;letter-spacing:.02em}
+.panel-body{padding:var(--pad)}
 
-/* ---------- headline ---------- */
-.head{padding:26px 0 18px;border-bottom:1px solid var(--rule);display:flex;align-items:flex-end;gap:28px;flex-wrap:wrap}
-h1{font-family:var(--disp);font-weight:700;font-size:27px;letter-spacing:-.024em;margin:0 0 4px}
-.sub{color:var(--muted);font-size:13px;max-width:62ch;margin:0}
-.head-num{margin-left:auto;text-align:right}
-.head-num .n{font-family:var(--mono);font-weight:600;font-size:30px;letter-spacing:-.03em;color:var(--cost)}
-.head-num .l{font-size:11px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-family:var(--disp);font-weight:600}
+.hero{padding:24px var(--pad) 20px}
+.hero-rate{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
+.hero-rate .big{font-family:"IBM Plex Mono",monospace;font-weight:600;
+  font-size:clamp(44px,8vw,76px);line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
+.hero-rate .unit{color:var(--steel);font-size:14px;padding-bottom:8px}
+.hero-note{color:var(--steel);font-size:13px;margin-top:8px;max-width:66ch}
+.strip{margin-top:26px}
+.strip-svg{width:100%;height:100px;display:block;overflow:visible}
+.tick rect{transition:opacity .12s}
+.tick:hover rect{opacity:1;stroke:var(--ink);stroke-width:1}
 
-/* ---------- filters ---------- */
-.filters{position:sticky;top:45px;z-index:50;background:var(--paper);border-bottom:1px solid var(--rule);
-  padding:11px 0;display:flex;gap:8px;align-items:center;flex-wrap:wrap}
-.fld{position:relative}
-.fbtn{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:6px 26px 6px 10px;
-  font-size:12.5px;min-width:112px;text-align:left;position:relative;white-space:nowrap}
-.fbtn:hover{border-color:var(--vol-2)}
-.fbtn.on{border-color:var(--vol);box-shadow:inset 2px 0 0 var(--vol)}
-.fbtn i{font-style:normal;color:var(--faint);font-size:10px;text-transform:uppercase;letter-spacing:.09em;
-  display:block;font-family:var(--disp);font-weight:600;line-height:1.3}
-.fbtn s{text-decoration:none;font-weight:500;display:block;max-width:170px;overflow:hidden;text-overflow:ellipsis}
-.fbtn::after{content:"";position:absolute;right:9px;top:50%;margin-top:-2px;border:4px solid transparent;border-top-color:var(--faint)}
-.pop{position:absolute;top:calc(100% + 4px);left:0;z-index:70;background:var(--surface);border:1px solid var(--rule);
-  border-radius:var(--r);box-shadow:0 8px 26px rgba(15,32,39,.14);min-width:230px;max-height:320px;overflow:auto;padding:6px;display:none}
-.pop.open{display:block}
-.pop label{display:flex;gap:8px;align-items:center;padding:5px 7px;border-radius:2px;cursor:pointer;font-size:12.5px}
-.pop label:hover{background:var(--soft)}
-.pop input{accent-color:var(--vol);margin:0}
-.pop .tools{display:flex;gap:6px;padding:4px 7px 7px;border-bottom:1px solid var(--soft);margin-bottom:4px}
-.pop .tools button{font-size:11px;background:none;border:none;color:var(--vol);padding:0;text-decoration:underline}
-.srch{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:6px 10px;font-size:12.5px;width:170px;font-family:var(--body)}
-.reset{background:none;border:none;color:var(--muted);font-size:12px;text-decoration:underline;margin-left:auto}
-.reset:hover{color:var(--warn)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--rule-soft)}
+.kpi{background:var(--card);padding:14px var(--pad)}
+.kpi .v{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:21px;
+  letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px}
+.kpi .d{font-size:11px;color:var(--steel-light);margin-top:2px}
 
-/* ---------- ledger band (KPI cards) ---------- */
-.ledger{display:grid;grid-template-columns:repeat(4,1fr);background:var(--surface);border:1px solid var(--rule);
-  border-radius:var(--r);margin:20px 0;overflow:hidden}
-.cell{padding:14px 16px 12px;border-right:1px solid var(--soft);border-bottom:1px solid var(--soft);position:relative}
-.cell:nth-child(4n){border-right:none}
-.cell:nth-child(n+5){border-bottom:none}
-.cell .k{font-family:var(--disp);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}
-.cell .v{font-family:var(--mono);font-weight:600;font-size:25px;letter-spacing:-.03em;margin:5px 0 1px;line-height:1.05}
-.cell .u{font-size:11.5px;color:var(--faint)}
-.cell.money .v{color:var(--cost)}
-.cell.vol .v{color:var(--vol)}
-.cell.alert .v{color:var(--warn)}
-.delta{font-family:var(--mono);font-size:11px;font-weight:500;margin-left:7px;letter-spacing:0}
-.delta.up{color:var(--vol)} .delta.down{color:var(--warn)} .delta.flat{color:var(--faint)}
-.spark{position:absolute;right:14px;bottom:11px;opacity:.9}
+.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px}
+@media(max-width:900px){.grid2{grid-template-columns:1fr}}
+.chart{width:100%;display:block;overflow:visible}
+.dot{cursor:pointer}
+.dot:hover circle{stroke:var(--ink);stroke-width:1.5}
 
-/* ---------- panels ---------- */
-.grid{display:grid;gap:16px}
-.g2{grid-template-columns:1.42fr 1fr}
-.g2b{grid-template-columns:1fr 1fr}
-.panel{background:var(--surface);border:1px solid var(--rule);border-radius:var(--r);padding:16px 18px 18px;margin-bottom:16px}
-.ph{display:flex;align-items:baseline;gap:12px;margin-bottom:2px;flex-wrap:wrap}
-.ph h2{font-family:var(--disp);font-weight:600;font-size:14px;letter-spacing:-.008em;margin:0}
-.ph p{margin:0;color:var(--muted);font-size:12px}
-.ph .right{margin-left:auto;display:flex;gap:10px;align-items:center}
-.legend{display:flex;gap:12px;font-size:11px;color:var(--muted);font-family:var(--mono)}
-.legend b{display:inline-block;width:9px;height:9px;border-radius:1px;margin-right:5px;vertical-align:-1px}
-.mini{font-size:11.5px;background:none;border:1px solid var(--rule);border-radius:var(--r);padding:3px 8px;color:var(--ink2)}
-.mini:hover{border-color:var(--vol)}
-.mini.act{background:var(--ink);color:#fff;border-color:var(--ink)}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden}
+.seg button{background:var(--card);color:var(--steel);border:none;border-right:1px solid var(--rule);
+  padding:6px 13px;font-size:11px}
+.seg button:last-child{border-right:none}
+.seg button.on{background:var(--ink);color:#fff}
 
-/* ---------- breadcrumb ---------- */
-.crumb{display:flex;gap:6px;align-items:center;font-size:12px;margin:2px 0 12px;flex-wrap:wrap}
-.crumb button{background:none;border:none;padding:0;color:var(--vol);text-decoration:underline;font-size:12px}
-.crumb span{color:var(--faint)}
-.crumb em{font-style:normal;color:var(--ink);font-weight:600}
-
-/* ---------- drill rows ---------- */
-.rows{margin-top:4px}
-.row{display:grid;grid-template-columns:1fr 78px 92px;gap:12px;align-items:center;padding:6px 0;border-bottom:1px solid var(--soft);cursor:pointer}
-.row:last-child{border-bottom:none}
-.row:hover{background:var(--soft)}
-.row.nodrill{cursor:default}
-.row .lab{display:flex;align-items:center;gap:9px;min-width:0}
-.row .lab span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12.5px}
-.bar{height:15px;background:var(--vol-tint);border-radius:1px;flex:0 0 auto;position:relative;min-width:2px}
-.bar i{position:absolute;inset:0;background:var(--vol);border-radius:1px}
-.row .num{font-family:var(--mono);font-size:12px;text-align:right;color:var(--ink2)}
-.chip{font-family:var(--mono);font-size:11px;text-align:right;padding:2px 6px;border-radius:2px;white-space:nowrap}
-.chip.good{background:var(--vol-tint);color:var(--vol)}
-.chip.bad{background:var(--cost-tint);color:var(--cost)}
-.chip.na{background:var(--soft);color:var(--faint)}
-
-/* ---------- svg charts ---------- */
-svg{display:block;width:100%;overflow:visible}
-.ax{font-family:var(--mono);font-size:10px;fill:var(--faint)}
-.gl{stroke:var(--soft);stroke-width:1}
-.hit{cursor:pointer}
-.hit:hover{opacity:.82}
-
-/* ---------- split bars ---------- */
-.split{margin-top:12px}
-.split + .split{margin-top:16px}
-.split .st{font-family:var(--disp);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-bottom:6px}
-.sbar{display:flex;height:26px;border-radius:2px;overflow:hidden;background:var(--soft)}
-.sbar div{position:relative;cursor:default;transition:filter .12s}
-.sbar div:hover{filter:brightness(1.14)}
-.skey{display:flex;gap:14px;flex-wrap:wrap;margin-top:7px;font-size:11.5px;color:var(--ink2)}
-.skey i{width:9px;height:9px;border-radius:1px;display:inline-block;margin-right:5px}
-.skey b{font-family:var(--mono);font-weight:500;color:var(--muted);margin-left:4px}
-
-/* ---------- heatmap ---------- */
-.heat{display:grid;grid-template-columns:34px repeat(24,1fr);gap:2px;margin-top:10px}
-.heat .hh{font-family:var(--mono);font-size:9px;color:var(--faint);text-align:center}
-.heat .rl{font-family:var(--mono);font-size:10px;color:var(--muted);display:flex;align-items:center}
-.heat .c{aspect-ratio:1;border-radius:1px;background:var(--soft)}
-
-/* ---------- table ---------- */
-.tbl-scroll{overflow:auto;max-height:520px;margin-top:8px;border:1px solid var(--soft);border-radius:var(--r)}
-table{border-collapse:collapse;width:100%;font-size:12.5px}
-th{position:sticky;top:0;background:var(--surface);text-align:left;font-family:var(--disp);font-weight:600;font-size:10.5px;
-  text-transform:uppercase;letter-spacing:.08em;color:var(--muted);padding:9px 10px;border-bottom:1px solid var(--rule);cursor:pointer;white-space:nowrap}
-th:hover{color:var(--ink)}
-th.n,td.n{text-align:right}
+.tablewrap{overflow-x:auto;max-height:580px}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--steel);text-align:right;
+  padding:9px 12px;border-bottom:1px solid var(--rule);cursor:pointer;white-space:nowrap;
+  background:var(--card);position:sticky;top:0;z-index:1}
+th:first-child,td:first-child{text-align:left}
 th.sorted{color:var(--ink)}
-th.sorted::after{content:" ▾";color:var(--vol)}
-th.sorted.asc::after{content:" ▴"}
-td{padding:7px 10px;border-bottom:1px solid var(--soft)}
-tbody tr:hover{background:var(--soft)}
-td.n{font-family:var(--mono)}
-td.money{font-family:var(--mono);color:var(--cost)}
-.who2{font-weight:500}
-.who2 em{font-style:normal;display:block;font-family:var(--mono);font-size:10.5px;color:var(--faint)}
+td{padding:9px 12px;border-bottom:1px solid var(--rule-soft);text-align:right;white-space:nowrap}
+tbody tr:hover td{background:#f7f9fb}
+.who{display:flex;flex-direction:column;gap:1px}
+.who .m{font-size:11px;color:var(--steel-light)}
+.cpi-cell{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
+.chip{width:8px;height:8px;border-radius:1px;flex:none}
+.tag{font-family:"IBM Plex Mono",monospace;font-size:10px;padding:1px 5px;border-radius:2px;
+  background:var(--rule-soft);color:var(--steel)}
+.bar{display:inline-block;height:5px;border-radius:1px;background:var(--rule);vertical-align:middle;margin-right:7px}
 
-.gaps{display:grid;grid-template-columns:1fr 1fr;gap:20px}
-.gap-list{max-height:210px;overflow:auto;border:1px solid var(--soft);border-radius:var(--r)}
-.gap-list div{display:flex;gap:10px;padding:6px 10px;border-bottom:1px solid var(--soft);font-size:12px}
-.gap-list div:last-child{border-bottom:none}
-.gap-list span:first-child{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.gap-list b{font-family:var(--mono);font-weight:500}
-.empty{padding:26px;text-align:center;color:var(--muted);font-size:12.5px}
+.banner{border:1px solid var(--warn-rule);background:var(--warn-bg);color:var(--warn-ink);
+  padding:11px var(--pad);border-radius:var(--radius);margin-bottom:14px;font-size:13px}
+.banner b{font-weight:500}
+.banner ul{margin:6px 0 0;padding-left:18px}
+.status{font-size:12px;color:var(--steel);font-family:"IBM Plex Mono",monospace}
 
-/* ---------- tooltip ---------- */
-#tip{position:fixed;z-index:200;pointer-events:none;background:var(--ink);color:#fff;padding:7px 10px;border-radius:var(--r);
-  font-size:11.5px;line-height:1.5;opacity:0;transition:opacity .1s;max-width:250px}
-#tip b{font-family:var(--mono);font-weight:500}
-#tip.on{opacity:1}
+details.sql{margin-bottom:14px}
+details.sql summary{cursor:pointer;list-style:none;padding:10px var(--pad);background:var(--card);
+  border:1px solid var(--rule);border-radius:var(--radius);
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:11px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--steel)}
+details.sql summary::-webkit-details-marker{display:none}
+details.sql[open] summary{border-radius:var(--radius) var(--radius) 0 0;color:var(--ink)}
+.sqlbox{border:1px solid var(--rule);border-top:none;border-radius:0 0 var(--radius) var(--radius);
+  background:var(--card);padding:0 var(--pad) var(--pad)}
+.sqlbox .eyebrow{padding:12px 0 6px}
+textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-size:12px;
+  line-height:1.6;color:var(--ink);background:#fbfcfd;border:1px solid var(--rule);
+  border-radius:var(--radius);padding:12px;resize:vertical}
 
-/* ---------- gate ---------- */
-#gate{position:fixed;inset:0;z-index:300;background:var(--ink);color:#E7EEEC;display:none;align-items:center;justify-content:center;padding:24px}
-#gate.on{display:flex}
-.gate-card{max-width:400px;text-align:left}
-.gate-card h2{font-family:var(--disp);font-weight:700;font-size:22px;margin:0 0 8px;letter-spacing:-.02em}
-.gate-card p{color:#93ABA6;font-size:13px;margin:0 0 20px}
-.gate-err{background:rgba(159,46,34,.22);border:1px solid rgba(159,46,34,.5);color:#F2C9C3;padding:9px 12px;border-radius:var(--r);font-size:12.5px;margin-bottom:16px;display:none}
-.gate-err.on{display:block}
-.gate-busy{display:none;margin-top:16px;font-family:var(--mono);font-size:12px;color:#8FA8A3}
-.gate-busy.on{display:block}
-.gate-foot{color:#7A9490;font-size:11.5px;margin:22px 0 0;border-top:1px solid rgba(255,255,255,.12);padding-top:14px}
-
-/* payroll figures blanked server-side for non-cost viewers */
-body.nocost .cell.money,body.nocost .head-num,body.nocost td.money,
-body.nocost th[data-k="sal"],body.nocost th[data-k="cost"],
-body.nocost th[data-k="cpi"],body.nocost th[data-k="cps"]{display:none}
-
-@media(max-width:1080px){
-  .ledger{grid-template-columns:repeat(2,1fr)}
-  .cell:nth-child(4n){border-right:1px solid var(--soft)}
-  .cell:nth-child(2n){border-right:none}
-  .cell:nth-child(n+5){border-bottom:1px solid var(--soft)}
-  .cell:nth-child(n+7){border-bottom:none}
-  .g2,.g2b,.gaps{grid-template-columns:1fr}
-}
-@media(max-width:640px){
-  .head-num{margin-left:0}
-  .heat{grid-template-columns:28px repeat(24,1fr);gap:1px}
-  .row{grid-template-columns:1fr 62px 78px}
-}
-@media(prefers-reduced-motion:reduce){*{transition:none!important}}
+.rise{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
+@keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+@media(prefers-reduced-motion:reduce){.rise{animation:none}*{transition:none!important}}
 </style>
 </head>
 <body>
-
-<div class="top">
-  <div class="top-in">
-    <div class="mark">QC Cost <span>&amp;</span> Output</div>
-    <div class="top-meta">
-      <span id="freshness"></span>
-      <span id="userSlot"></span>
-    </div>
-  </div>
-</div>
-
-<div class="banner" id="demoBanner">
-  <div><b>Sample data.</b> Not connected to BigQuery yet — set MODE to 'live' and fill in RELAY_URL to load real figures.</div>
-</div>
-
 <div class="wrap">
 
-  <div class="head">
+  <div class="topbar">
     <div>
-      <h1>What each QC costs per image</h1>
-      <p class="sub">Monthly payroll from <b>salary_sheet</b> joined to output from <b>delivery_working_data</b> on work email. Each person's salary is spread across their images, so every figure below stays true under any filter.</p>
+      <div class="eyebrow">Spyne · Delivery Operations</div>
+      <h1>QC Cost, Output &amp; Accuracy</h1>
+      <div class="sub">Salary on email + month · AI accuracy on team + month.</div>
     </div>
-    <div class="head-num">
-      <div class="n" id="bigCPI">—</div>
-      <div class="l">Cost per image</div>
+    <div class="controls">
+      <select id="f-month"><option value="">All months</option></select>
+      <select id="f-seg"><option value="">All segments</option></select>
+      <input type="text" id="f-search" placeholder="Find…" style="width:140px">
+      <button class="ghost" id="btn-csv">Export CSV</button>
+      <button id="btn-run">Run query</button>
     </div>
   </div>
 
-  <div class="filters" id="filters"></div>
+  <div id="banners"></div>
 
-  <div class="ledger" id="ledger"></div>
+  <details class="sql">
+    <summary>SQL — three queries, run together</summary>
+    <div class="sqlbox">
+      <div class="eyebrow">A · person × day — cost and output</div>
+      <textarea id="sql-a" spellcheck="false"></textarea>
+      <div class="eyebrow">B · team × month — cost joined to ai_accuracy</div>
+      <textarea id="sql-b" spellcheck="false"></textarea>
+      <div class="eyebrow">C · work excluded by the domain filter</div>
+      <textarea id="sql-c" spellcheck="false" style="min-height:140px"></textarea>
+    </div>
+  </details>
 
-  <div class="grid g2">
-    <div class="panel">
-      <div class="ph">
-        <h2>Month by month</h2>
-        <p>Click a month to filter everything below.</p>
-        <div class="right"><div class="legend">
-          <span><b style="background:var(--vol)"></b>Images</span>
-          <span><b style="background:var(--cost)"></b>Cost / image</span>
-        </div></div>
+  <div class="panel hero-panel">
+    <div class="hero">
+      <div class="eyebrow">Blended cost per image</div>
+      <div class="hero-rate">
+        <div class="big" id="hero-cpi">—</div>
+        <div class="unit" id="hero-unit"></div>
       </div>
-      <svg id="trend" viewBox="0 0 720 250" preserveAspectRatio="none" style="height:250px"></svg>
+      <div class="hero-note" id="hero-note">Each tick is one QC person in one month, placed on the cost axis. Bar height is image volume.</div>
+      <div class="strip"><svg class="strip-svg" id="strip" role="img" aria-label="Cost per image distribution across QC staff"></svg></div>
     </div>
+    <div class="kpis" id="kpis"></div>
+  </div>
 
+  <div class="panel">
+    <div class="panel-head">
+      <h2>Cost against accuracy, one dot per team-month</h2>
+      <span class="status" id="sc-n"></span>
+    </div>
+    <div class="panel-body"><svg class="chart" id="chart-scatter"></svg></div>
+  </div>
+
+  <div class="grid2">
     <div class="panel">
-      <div class="ph"><h2>Where the money goes</h2><p>Share of allocated payroll.</p></div>
-      <div id="splits"></div>
+      <div class="panel-head"><h2>Accuracy by image category</h2><span class="status" id="cat-n"></span></div>
+      <div class="panel-body"><svg class="chart" id="chart-cat"></svg></div>
+    </div>
+    <div class="panel">
+      <div class="panel-head"><h2>Daily output and rate</h2><span class="status">bars = images · line = cost/image</span></div>
+      <div class="panel-body"><svg class="chart" id="chart-trend"></svg></div>
     </div>
   </div>
 
   <div class="panel">
-    <div class="ph">
-      <h2>Drill down</h2>
-      <p>Enterprise → team → QC. Click any row to go deeper.</p>
-      <div class="right">
-        <button class="mini act" data-sort="images">By volume</button>
-        <button class="mini" data-sort="cost">By cost</button>
-        <button class="mini" data-sort="cpi">By cost / image</button>
+    <div class="panel-head">
+      <div class="seg" id="seg">
+        <button data-v="people" class="on">People</button>
+        <button data-v="accounts">Accounts</button>
+        <button data-v="teams">Rooftops</button>
       </div>
+      <span class="status" id="row-n"></span>
     </div>
-    <div class="crumb" id="crumb"></div>
-    <div class="rows" id="drill"></div>
-  </div>
-
-  <div class="grid g2b">
-    <div class="panel">
-      <div class="ph"><h2>Salary against output</h2><p>One dot per QC per month. Click a dot to focus that person.</p></div>
-      <svg id="scatter" viewBox="0 0 520 320" style="height:320px"></svg>
-    </div>
-    <div class="panel">
-      <div class="ph"><h2>Shift coverage</h2><p>Images by day and hour. Darker means busier.</p></div>
-      <div class="heat" id="heat"></div>
-    </div>
-  </div>
-
-  <div class="panel">
-    <div class="ph">
-      <h2>QC ledger</h2>
-      <p id="tblCount"></p>
-      <div class="right"><button class="mini" id="csv">Download CSV</button></div>
-    </div>
-    <div class="tbl-scroll"><table id="tbl"><thead></thead><tbody></tbody></table></div>
-  </div>
-
-  <div class="panel">
-    <div class="ph"><h2>Join gaps</h2><p>Rows that did not match across the two tables. Worth clearing before trusting the totals.</p></div>
-    <div class="gaps" id="gaps"></div>
+    <div class="tablewrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 
 </div>
 
-<div id="tip"></div>
-
-<script src="config.js?v=1"></script>
-
-<div id="gate">
-  <div class="gate-card">
-    <h2>Sign in to continue</h2>
-    <p>This dashboard shows payroll figures. Use your Spyne Google account — access is checked against an allowlist.</p>
-    <div class="gate-err" id="gateErr"></div>
-    <div id="gsiBtn"></div>
-    <div class="gate-busy" id="gateBusy">Loading from BigQuery…</div>
-    <p class="gate-foot">Access is limited to a named list. If your account is not on it, sign-in will be refused.</p>
-  </div>
-</div>
-
+<script src="https://accounts.google.com/gsi/client" async defer></script>
 <script>
-/* ==================================================================
-   CONFIG — comes from config.js. Edit that file, not this one.
-   ================================================================== */
-const CONFIG = Object.assign(
-  {MODE:'demo', RELAY_URL:'', GOOGLE_CLIENT_ID:'', AUTH_ALLOWED_EMAILS:[]},
-  window.QC_CONFIG || {}
-);
-
-/* ==================================================================
-   Formatting
-   ================================================================== */
-const nf  = n => (n==null||isNaN(n)) ? '—' : Math.round(n).toLocaleString('en-IN');
-const nf1 = n => (n==null||isNaN(n)) ? '—' : Number(n).toLocaleString('en-IN',{minimumFractionDigits:1,maximumFractionDigits:1});
-const money = n => (n==null||isNaN(n)) ? '—' : '₹'+Math.round(n).toLocaleString('en-IN');
-const money2 = n => (n==null||isNaN(n)) ? '—' : '₹'+Number(n).toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2});
-const compact = n => {
-  if(n==null||isNaN(n)) return '—';
-  if(Math.abs(n)>=1e7) return (n/1e7).toFixed(2)+' Cr';
-  if(Math.abs(n)>=1e5) return (n/1e5).toFixed(2)+' L';
-  if(Math.abs(n)>=1e3) return (n/1e3).toFixed(1)+'k';
-  return Math.round(n).toLocaleString('en-IN');
+/* ==========================================================================
+   1. CONFIG
+   ========================================================================== */
+const CONFIG = {
+  project : "inspired-frame-453018-r2",
+  dataset : "spyne_reviews",
+  clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",              // OAuth client ID (Web application) from GCP
+  symbol  : "\u20B9",
+  qcDomains: ["spyne.co.in"],
+  jsonFallback: "data.json"  // {daily, teams, categories, excluded}
 };
-const pct = n => (n==null||isNaN(n)) ? '—' : (n>0?'+':'')+n.toFixed(1)+'%';
-const esc = s => String(s==null?'':s).replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
-const DOW = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
 
-/* ==================================================================
-   Sample data — mirrors the shape of the fact/heat/gaps queries
-   ================================================================== */
-let seed = 20260827;
-const rnd = () => (seed = (seed*1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
-const pick = a => a[Math.floor(rnd()*a.length)];
+/* ==========================================================================
+   2. SQL
+   Two independent month keys, because the two tables spell months differently:
+     salary_sheet  "Jul'26"      -> %b'%y
+     ai_accuracy   "1 Apr, 2026" -> %e %b, %Y
+   Both normalise to YYYY-MM before anything joins.
+   ========================================================================== */
+const QC_DOMAINS = CONFIG.qcDomains
+  .map(d => `LOWER(TRIM(QC)) LIKE '%@${d.replace(/^@/, "")}'`).join("\n         OR ");
 
-const MONTHS = ["Apr'26","May'26","Jun'26","Jul'26"];
+const ACC_MONTH = `FORMAT_DATE('%Y-%m', COALESCE(
+      SAFE.PARSE_DATE("%e %b, %Y", TRIM(Month)),
+      SAFE.PARSE_DATE("%d %b, %Y", TRIM(Month)),
+      SAFE.PARSE_DATE("%b %e, %Y", TRIM(Month)),
+      SAFE.PARSE_DATE("%Y-%m-%d",  TRIM(Month))))`;
 
-const PEOPLE = [
-  ['E6558','Adarsh Singh','adarsh.singh@spyne.co.in',[21767,19000,18841,23239]],
-  ['E6208','Ajay Dev Rani','ajay.dev@spyne.co.in',[36700,46700,41200,39800]],
-  ['E6198','Ajay Prajapati','ajay.prajapati@spyne.co.in',[41870,41930,38967,34218]],
-  ['E6181','Ajeet Kumar','ajit.yadav@spyne.co.in',[47842,47840,49850,45000]],
-  ['E6539','Akshay Kumar Jha','akshay.jha@spyne.co.in',[31310,36800,36828,33925]],
-  ['E6460','Ankesh Raj','ankesh.raj@spyne.co.in',[22990,58945,32918,29540]],
-  ['E6542','Ankit Sharma','ankit.sharma@spyne.co.in',[20500,33100,27700,26900]],
-  ['E6580','Ankul Kumar','ankul.kumar@spyne.co.in',[26200,24493,25100,24900]],
-  ['E6611','Deepak Yadav','deepak.yadav@spyne.co.in',[28400,29100,30250,31000]],
-  ['E6402','Om Prakash Prajapati','omprakash.prajapati@spyne.co.in',[38200,39900,41100,40500]],
-  ['E6377','Pooja Rani','pooja.rani@spyne.co.in',[33400,34100,33900,35600]],
-  ['E6501','Rahul Verma','rahul.verma@spyne.co.in',[25800,26400,27100,28900]],
-  ['E6455','Ravi Kant','ravi.kant@spyne.co.in',[44300,43800,45900,46200]],
-  ['E6288','Rohit Gupta','rohit.gupta@spyne.co.in',[51200,52400,50900,53100]],
-  ['E6620','Sandeep Kumar','sandeep.kumar@spyne.co.in',[19800,21400,22100,23000]],
-  ['E6317','Shivam Tiwari','shivam.tiwari@spyne.co.in',[35600,36200,37400,36900]],
-  ['E6349','Sonu Kumar','sonu.kumar@spyne.co.in',[29900,30400,31200,30800]],
-  ['E6588','Suraj Pal','suraj.pal@spyne.co.in',[23100,24800,25600,26300]],
-  ['E6212','Vikas Sharma','vikas.sharma@spyne.co.in',[42700,43100,44800,44200]],
-  ['E6491','Vinay Kumar','vinay.kumar@spyne.co.in',[27400,28100,29000,29700]],
-  ['E6533','Neha Bansal','neha.bansal@spyne.co.in',[31800,32600,33400,34100]],
-  ['E6604','Md Faisal','md.faisal@spyne.co.in',[24600,25300,26800,27500]],
-];
-// people producing output but absent from payroll that month
-const UNMATCHED = ['contractor.qc1@spyne.co.in','temp.reviewer@spyne.co.in'];
+const SHARED = `
+WITH work AS (
+  SELECT
+    LOWER(TRIM(QC))                                  AS qc_email,
+    SPLIT(LOWER(TRIM(QC)), '@')[OFFSET(0)]           AS qc_local,
+    DATE(Hourly_Date)                                AS work_date,
+    FORMAT_DATE('%Y-%m', DATE(Hourly_Date))          AS month_key,
+    Hourly_Date,
+    Product, Type, Enterprise, Team_Name,
+    LOWER(TRIM(Enterprise_id))                       AS enterprise_id,
+    LOWER(TRIM(Team_id))                             AS team_id,
+    IFNULL(Dealer_Type, 'UNKNOWN')                   AS dealer_type,
+    IFNULL(Images, 0)                                AS images,
+    IFNULL(Tool_Count, 0)                            AS tool_count,
+    IFNULL(SKU_Count, 0)                             AS sku_count
+  FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
+  WHERE QC IS NOT NULL AND TRIM(QC) != ''
+    AND (${QC_DOMAINS})
+),
+salary_raw AS (
+  SELECT
+    FORMAT_DATE('%Y-%m', SAFE.PARSE_DATE("%b'%y", Month))  AS month_key,
+    LOWER(TRIM(\`Work Email\`))                             AS email,
+    \`Employee Name\`                                       AS name,
+    \`Employee Number\`                                     AS emp_no,
+    Salary                                                 AS salary
+  FROM \`${CONFIG.project}.${CONFIG.dataset}.salary_sheet\`
+  WHERE \`Work Email\` IS NOT NULL
+    AND Salary IS NOT NULL
+    AND SAFE.PARSE_DATE("%b'%y", Month) IS NOT NULL
+),
+sal_email AS (
+  SELECT month_key, email,
+         ANY_VALUE(name) AS name, ANY_VALUE(emp_no) AS emp_no, SUM(salary) AS salary
+  FROM salary_raw GROUP BY month_key, email
+),
+pm_volume AS (
+  SELECT qc_email, qc_local, month_key,
+         SUM(images)                 AS month_images,
+         COUNT(DISTINCT Hourly_Date) AS month_hours
+  FROM work GROUP BY qc_email, qc_local, month_key
+),
+pm AS (
+  SELECT
+    v.qc_email, v.month_key, v.month_images, v.month_hours,
+    s.salary                                                  AS month_salary,
+    COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
+    s.emp_no                                                  AS emp_no,
+    IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
+    SAFE_DIVIDE(s.salary, NULLIF(v.month_images, 0))          AS rate
+  FROM pm_volume v
+  LEFT JOIN sal_email s
+    ON  s.month_key = v.month_key
+    AND s.email     = v.qc_email
+)`;
 
-const ENTS = [
-  ['93f92de4','Deery Brothers Ford','FRANCHISE',['Deery Brothers Ford','Deery CDJR']],
-  ['81d94123','Emerald Motors','INDEPENDENT',['Emerald Motors - Wholesale']],
-  ['c1a8d463','Northgate Auto company LLC','INDEPENDENT',['Northgate Auto company LLC']],
-  ['be8c747b','Smartlot Solutions','RESELLER',['Lokey Volkswagen','UNKNOWN_TEAM','Smartlot Core']],
-  ['1c1f3cbe','Meyer Imports DBA Berwyn Kia','FRANCHISE',['Berwyn Kia_Illinois']],
-  ['1f58a452','Montgomery Moore','FRANCHISE',['Montgomery Moore']],
-  ['ae9a619e','Chevy Chase Acura','FRANCHISE',['Chevy Chase Acura']],
-  ['927d8b41','Korf Motors','FRANCHISE',['Korf CDJR Fort Morgan','Korf Chevrolet']],
-  ['1713df08','Yemm Auto','FRANCHISE',['Yemm Chrysler Dodge Jeep Ram','Yemm Ford']],
-  ['124028d6','Walker Jones Chevrolet','FRANCHISE',['Nissan_2','Walker Jones Main']],
-  ['QJC7Y1H6','Bergstrom Automotive','FRANCHISE',['Bergstrom AutosTeam-A','Bergstrom AutosTeam-B']],
-  ['5a2b91cc','Asbury Automotive Group','FRANCHISE',['Asbury Central','Asbury South','Asbury West']],
-  ['7fd10ea3','Jenkins Auto Group','FRANCHISE',['Jenkins Kia','Jenkins Hyundai']],
-  ['3ce88a71','Gettel Automotive','FRANCHISE',['Gettel Toyota','Gettel Nissan']],
-  ['9b04ff20','Preston Auto Group','INDEPENDENT',['Preston Ford','Preston Superstore']],
-];
-const PRODUCTS = ['Images','Images','Images','360','Video'];
-const WTYPES   = ['editing','editing','editing','qc','tool'];
+const SQL_A = SHARED + `,
+daily AS (
+  SELECT qc_email, month_key, work_date,
+         COUNT(DISTINCT Hourly_Date) AS hours,
+         SUM(images) AS images, SUM(tool_count) AS tool_count, SUM(sku_count) AS sku_count
+  FROM work GROUP BY qc_email, month_key, work_date
+)
+SELECT
+  d.month_key, d.qc_email AS email, pm.name, pm.emp_no, pm.match_type,
+  CAST(d.work_date AS STRING) AS work_date,
+  d.hours, d.images, d.tool_count, d.sku_count,
+  pm.month_salary, pm.month_images, pm.month_hours,
+  ROUND(d.images * pm.rate, 4) AS allocated_cost
+FROM daily d
+JOIN pm ON pm.qc_email = d.qc_email AND pm.month_key = d.month_key
+ORDER BY d.work_date DESC, d.images DESC`;
 
-function buildSample(){
-  const fact = [], heat = [], gaps = [];
-  const roster = PEOPLE.map(p=>({emp:p[0],name:p[1],mail:p[2],sal:p[3]}));
+/* ai_accuracy is 4 rows per team-month (one per Image_Category), so it MUST be
+   collapsed to one row per team-month before it touches anything. Two traps:
+     - true_accuracy is a percentage. Rolling it up needs a Total_Images weight,
+       not AVG, or a 4-image category counts as much as a 900-image one.
+     - VINs repeats the same figure across categories (38/38/38/20 in the
+       preview). SUM would multiply it. MAX is the honest read. */
+const SQL_B = SHARED + `,
+acc AS (
+  SELECT
+    ${ACC_MONTH}                                                       AS month_key,
+    LOWER(TRIM(Team_ID))                                               AS team_id,
+    ANY_VALUE(Customer_Segment)                                        AS segment,
+    ANY_VALUE(Enterprise_Name)                                         AS acc_enterprise,
+    MAX(VINs)                                                          AS vins,
+    SUM(Total_Images)                                                  AS acc_images,
+    SAFE_DIVIDE(SUM(true_accuracy * Total_Images), SUM(Total_Images))  AS true_accuracy
+  FROM \`${CONFIG.project}.${CONFIG.dataset}.ai_accuracy\`
+  WHERE Team_ID IS NOT NULL AND TRIM(Team_ID) != ''
+  GROUP BY month_key, team_id
+),
+team AS (
+  SELECT
+    w.month_key,
+    w.team_id,
+    ANY_VALUE(w.Enterprise)     AS enterprise,
+    ANY_VALUE(w.enterprise_id)  AS enterprise_id,
+    ANY_VALUE(w.Team_Name)      AS team_name,
+    ANY_VALUE(w.dealer_type)    AS dealer_type,
+    COUNT(DISTINCT w.qc_email)  AS people,
+    SUM(w.images)               AS images,
+    SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
+    ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost
+  FROM work w
+  JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
+  GROUP BY w.month_key, w.team_id
+)
+SELECT
+  t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
+  t.people, t.images, t.unpriced_images, t.allocated_cost,
+  a.segment, a.vins, a.acc_images,
+  ROUND(a.true_accuracy, 2) AS true_accuracy
+FROM team t
+LEFT JOIN acc a           -- LEFT: a rooftop with no accuracy row still shows its cost
+  ON  a.month_key = t.month_key
+  AND a.team_id   = t.team_id
+ORDER BY t.images DESC
+LIMIT 8000`;
 
-  MONTHS.forEach((mk, mi)=>{
-    const monthStart = '2026-0'+(4+mi)+'-01';
+const SQL_C = `
+SELECT
+  FORMAT_DATE('%Y-%m', DATE(Hourly_Date))     AS month_key,
+  LOWER(TRIM(QC))                             AS email,
+  SUM(IFNULL(Images, 0))                      AS images,
+  COUNT(DISTINCT Hourly_Date)                 AS hours
+FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
+WHERE QC IS NOT NULL AND TRIM(QC) != ''
+  AND NOT (${QC_DOMAINS})
+GROUP BY month_key, email
+ORDER BY images DESC
+LIMIT 500`;
 
-    roster.forEach(person=>{
-      // a couple of people take a month off — feeds the join-gap panel
-      if(person.mail==='ankul.kumar@spyne.co.in' && mi===3) return;
-      const combos = 8 + Math.floor(rnd()*13);
-      const skill  = .6 + rnd()*0.9;      // stable per-person productivity
-      for(let c=0;c<combos;c++){
-        const e = pick(ENTS);
-        const images = Math.max(20, Math.round((320+rnd()*2600)*skill));
-        fact.push({
-          month_key:mk, month_start:monthStart,
-          enterprise_id:e[0], enterprise:e[1], team_id:e[0].slice(0,6)+c,
-          team_name:pick(e[3]), dealer_type:e[2],
-          product:pick(PRODUCTS), work_type:pick(WTYPES), verticle:'Auto',
-          qc_email:person.mail, emp_no:person.emp, emp_name:person.name, is_matched:true,
-          qc_month_salary:person.sal[mi], qc_month_images:0,
-          active_days:1+Math.floor(rnd()*9),
-          images, skus:Math.round(images*(.85+rnd()*.3)),
-          tool_count:Math.round(images*rnd()*.14),
-          target:+(images*1.2625).toFixed(2), cost:0
-        });
-      }
-    });
+/* ==========================================================================
+   3. STATE + FORMAT
+   ========================================================================== */
+const S = { daily:[], teams:[], excluded:[], view:"people",
+            sortKey:"cpi", sortDir:-1, token:null };
 
-    UNMATCHED.forEach(mail=>{
-      const e = pick(ENTS);
-      const images = 400+Math.round(rnd()*2200);
-      fact.push({month_key:mk,month_start:monthStart,enterprise_id:e[0],enterprise:e[1],
-        team_id:e[0].slice(0,6)+'u',team_name:pick(e[3]),dealer_type:e[2],
-        product:pick(PRODUCTS),work_type:pick(WTYPES),verticle:'Auto',
-        qc_email:mail,emp_no:null,emp_name:null,is_matched:false,
-        qc_month_salary:null,qc_month_images:0,active_days:3+Math.floor(rnd()*6),
-        images,skus:Math.round(images*.9),tool_count:0,target:+(images*1.2625).toFixed(2),cost:null});
-    });
+const money = n => CONFIG.symbol + new Intl.NumberFormat("en-IN",
+  {maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0}).format(n);
+const int  = n => new Intl.NumberFormat("en-IN").format(Math.round(n));
+const dec  = (n,d=1) => Number(n).toFixed(d);
+const pct  = n => n == null ? "—" : dec(n,1) + "%";
+const esc  = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 
-    for(let d=0;d<7;d++) for(let h=0;h<24;h++){
-      const wk = (d===0)?.28:(d===6?.55:1);
-      const shift = (h>=6&&h<=22)?(1-Math.abs(14-h)/16):0.12;
-      heat.push({month_key:mk,work_dow:d+1,work_hour:h,
-        images:Math.round(2600*wk*shift*(.7+rnd()*.6)),
-        cost:0,qcs:Math.round(14*wk*shift)});
-    }
-  });
-
-  // allocate salary across each QC's month, exactly as the SQL does
-  const den = {};
-  fact.forEach(r=>{const k=r.qc_email+'|'+r.month_key; den[k]=(den[k]||0)+r.images;});
-  fact.forEach(r=>{
-    const k=r.qc_email+'|'+r.month_key;
-    r.qc_month_images = den[k];
-    r.cost = r.is_matched ? r.qc_month_salary*r.images/den[k] : null;
-  });
-
-  MONTHS.forEach((mk,mi)=>{
-    UNMATCHED.forEach(mail=>{
-      const im = fact.filter(r=>r.qc_email===mail&&r.month_key===mk).reduce((a,b)=>a+b.images,0);
-      gaps.push({gap_type:'output_without_salary',month_key:mk,qc_email:mail,emp_no:null,emp_name:null,images:im,salary:0});
-    });
-    if(mi===3) gaps.push({gap_type:'salary_without_output',month_key:mk,qc_email:'ankul.kumar@spyne.co.in',
-      emp_no:'E6580',emp_name:'Ankul Kumar',images:0,salary:24900});
-  });
-  gaps.push({gap_type:'salary_without_output',month_key:"Jun'26",qc_email:'priya.singh@spyne.co.in',
-    emp_no:'E6712',emp_name:'Priya Singh',images:0,salary:38400});
-
-  return {fact,heat,gaps};
+function costColor(ratio){
+  const stops = [[.55,[14,124,102]],[1,[91,104,120]],[1.9,[158,27,50]]];
+  if (!isFinite(ratio) || ratio <= 0) return "#8b97a5";
+  const r = Math.max(stops[0][0], Math.min(stops[2][0], ratio));
+  const [lo,hi] = r <= 1 ? [stops[0],stops[1]] : [stops[1],stops[2]];
+  const t = (r - lo[0]) / (hi[0] - lo[0]);
+  return "rgb(" + lo[1].map((v,i) => Math.round(v + (hi[1][i]-v)*t)).join(",") + ")";
 }
+const banner = html => document.getElementById("banners")
+  .insertAdjacentHTML("beforeend", `<div class="banner">${html}</div>`);
+const clearBanners = () => document.getElementById("banners").innerHTML = "";
 
-/* ==================================================================
-   State
-   ================================================================== */
-let DATA = {fact:[],heat:[],gaps:[]};
-let canSeeCost = true;
-const F = {month:new Set(),product:new Set(),work_type:new Set(),dealer_type:new Set(),
-           enterprise:new Set(),team_name:new Set(),qc:''};
-let drill = {level:0, enterprise:null, team_name:null, qc_email:null};
-let drillSort = 'images';
-let tblSort = {key:'cost', dir:-1};
-
-const uniq = k => [...new Set(DATA.fact.map(r=>r[k]).filter(v=>v!=null))].sort();
-
-function filtered(){
-  return DATA.fact.filter(r=>{
-    if(F.month.size && !F.month.has(r.month_key)) return false;
-    if(F.product.size && !F.product.has(r.product)) return false;
-    if(F.work_type.size && !F.work_type.has(r.work_type)) return false;
-    if(F.dealer_type.size && !F.dealer_type.has(r.dealer_type)) return false;
-    if(F.enterprise.size && !F.enterprise.has(r.enterprise)) return false;
-    if(F.team_name.size && !F.team_name.has(r.team_name)) return false;
-    if(F.qc){
-      const q=F.qc.toLowerCase();
-      if(!(r.qc_email||'').toLowerCase().includes(q) && !(r.emp_name||'').toLowerCase().includes(q)) return false;
-    }
-    if(drill.enterprise && r.enterprise!==drill.enterprise) return false;
-    if(drill.team_name && r.team_name!==drill.team_name) return false;
-    if(drill.qc_email && r.qc_email!==drill.qc_email) return false;
-    return true;
-  });
-}
-
-const sum = (rows,k) => rows.reduce((a,r)=>a+(Number(r[k])||0),0);
-
-function rollup(rows, keyFn){
-  const m = new Map();
-  rows.forEach(r=>{
-    const k = keyFn(r); if(k==null) return;
-    let o = m.get(k);
-    if(!o){o={key:k,images:0,skus:0,cost:0,tool:0,target:0,qcs:new Set(),rows:[]};m.set(k,o);}
-    o.images+=r.images; o.skus+=r.skus; o.cost+=(r.cost||0); o.tool+=r.tool_count;
-    o.target+=r.target; o.qcs.add(r.qc_email); o.rows.push(r);
-  });
-  return [...m.values()].map(o=>({...o,qcs:o.qcs.size,cpi:o.images?o.cost/o.images:null,cps:o.skus?o.cost/o.skus:null}));
-}
-
-/* ==================================================================
-   Tooltip
-   ================================================================== */
-const tip = document.getElementById('tip');
-function showTip(e, html){
-  tip.innerHTML = html; tip.classList.add('on');
-  const r = tip.getBoundingClientRect();
-  let x = e.clientX+14, y = e.clientY+14;
-  if(x+r.width > innerWidth-10) x = e.clientX-r.width-14;
-  if(y+r.height > innerHeight-10) y = e.clientY-r.height-14;
-  tip.style.left = x+'px'; tip.style.top = y+'px';
-}
-const hideTip = () => tip.classList.remove('on');
-function bindTip(el, html){
-  el.addEventListener('mousemove', e=>showTip(e,html));
-  el.addEventListener('mouseleave', hideTip);
-}
-
-/* ==================================================================
-   Filter bar
-   ================================================================== */
-const FILTER_DEFS = [
-  ['month','Month','month_key'],
-  ['product','Product','product'],
-  ['work_type','Work type','work_type'],
-  ['dealer_type','Dealer type','dealer_type'],
-  ['enterprise','Enterprise','enterprise'],
-  ['team_name','Team','team_name'],
-];
-
-function renderFilters(){
-  const host = document.getElementById('filters');
-  host.innerHTML = '';
-  FILTER_DEFS.forEach(([key,label,col])=>{
-    let opts = uniq(col);
-    if(key==='month') opts = MONTHS.filter(m=>opts.includes(m)).concat(opts.filter(o=>!MONTHS.includes(o)));
-    if(key==='team_name' && F.enterprise.size){
-      opts = [...new Set(DATA.fact.filter(r=>F.enterprise.has(r.enterprise)).map(r=>r.team_name))].sort();
-    }
-    const sel = F[key];
-    const fld = document.createElement('div'); fld.className='fld';
-    const btn = document.createElement('button');
-    btn.className='fbtn'+(sel.size?' on':'');
-    btn.innerHTML = `<i>${esc(label)}</i><s>${sel.size===0?'All':(sel.size===1?esc([...sel][0]):sel.size+' selected')}</s>`;
-    const pop = document.createElement('div'); pop.className='pop';
-    pop.innerHTML = `<div class="tools"><button data-all>Select all</button><button data-none>Clear</button></div>` +
-      opts.map(o=>`<label><input type="checkbox" value="${esc(o)}"${sel.has(o)?' checked':''}><span>${esc(o)}</span></label>`).join('');
-    pop.addEventListener('click', e=>{
-      if(e.target.matches('[data-all]')){opts.forEach(o=>sel.add(o)); render(); return;}
-      if(e.target.matches('[data-none]')){sel.clear(); render(); return;}
-    });
-    pop.addEventListener('change', e=>{
-      const v = e.target.value;
-      e.target.checked ? sel.add(v) : sel.delete(v);
-      if(key==='enterprise') F.team_name.clear();
-      render();
-    });
-    btn.addEventListener('click', e=>{
-      e.stopPropagation();
-      const open = pop.classList.contains('open');
-      document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open'));
-      if(!open) pop.classList.add('open');
-    });
-    pop.addEventListener('click', e=>e.stopPropagation());
-    fld.append(btn,pop); host.append(fld);
-  });
-
-  const s = document.createElement('input');
-  s.className='srch'; s.placeholder='Search QC name or email'; s.value=F.qc;
-  let t; s.addEventListener('input', ()=>{clearTimeout(t); t=setTimeout(()=>{F.qc=s.value.trim(); render(); 
-    const n=document.querySelector('.srch'); if(n){n.focus(); n.setSelectionRange(n.value.length,n.value.length);}},260);});
-  host.append(s);
-
-  const rst = document.createElement('button');
-  rst.className='reset'; rst.textContent='Reset all filters';
-  rst.addEventListener('click', ()=>{
-    Object.keys(F).forEach(k=>{ if(F[k] instanceof Set) F[k].clear(); else F[k]=''; });
-    drill = {level:0,enterprise:null,team_name:null,qc_email:null};
-    render();
-  });
-  host.append(rst);
-}
-document.addEventListener('click', ()=>document.querySelectorAll('.pop.open').forEach(p=>p.classList.remove('open')));
-
-/* ==================================================================
-   Ledger cards
-   ================================================================== */
-function sparkline(vals, color){
-  if(vals.length<2) return '';
-  const w=54,h=16,mx=Math.max(...vals),mn=Math.min(...vals),rg=(mx-mn)||1;
-  const pts = vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-(v-mn)/rg*h).toFixed(1)}`).join(' ');
-  return `<svg class="spark" width="${w}" height="${h}" viewBox="0 0 ${w} ${h}">
-    <polyline points="${pts}" fill="none" stroke="${color}" stroke-width="1.4" stroke-linejoin="round" opacity=".55"/>
-    <circle cx="${w}" cy="${(h-(vals[vals.length-1]-mn)/rg*h).toFixed(1)}" r="2" fill="${color}"/></svg>`;
-}
-
-function renderLedger(rows){
-  const months = MONTHS.filter(m=>rows.some(r=>r.month_key===m));
-  const byMonth = months.map(m=>{
-    const rr = rows.filter(r=>r.month_key===m);
-    const im=sum(rr,'images'), sk=sum(rr,'skus'), co=sum(rr,'cost');
-    return {m,im,sk,co,cpi:im?co/im:0,cps:sk?co/sk:0,
-            qcs:new Set(rr.filter(r=>r.is_matched).map(r=>r.qc_email)).size,
-            days:sum(rr,'active_days')};
-  });
-  const d = (arr) => {
-    if(arr.length<2) return null;
-    const a=arr[arr.length-2], b=arr[arr.length-1];
-    return a? (b-a)/Math.abs(a)*100 : null;
-  };
-  const images=sum(rows,'images'), skus=sum(rows,'skus'), cost=sum(rows,'cost');
-  const matched = rows.filter(r=>r.is_matched);
-  const qcs = new Set(matched.map(r=>r.qc_email)).size;
-  const payrollHeads = new Set(DATA.fact.filter(r=>r.is_matched &&
-      (!F.month.size||F.month.has(r.month_key))).map(r=>r.qc_email)).size;
-  const unmatchedImg = sum(rows.filter(r=>!r.is_matched),'images');
-  const qcDays = sum(matched,'active_days');
-
-  const cards = [
-    {k:'Images processed', v:compact(images), u:nf(images)+' total', cls:'vol',
-     dl:d(byMonth.map(x=>x.im)), sp:byMonth.map(x=>x.im), col:'var(--vol)', dgood:1},
-    {k:'SKUs processed', v:compact(skus), u:nf(skus)+' vehicles', cls:'vol',
-     dl:d(byMonth.map(x=>x.sk)), sp:byMonth.map(x=>x.sk), col:'var(--vol)', dgood:1},
-    {k:'QCs contributing', v:nf(qcs), u:'of '+nf(payrollHeads)+' on payroll', cls:'',
-     dl:d(byMonth.map(x=>x.qcs)), sp:byMonth.map(x=>x.qcs), col:'var(--ink2)', dgood:1},
-    {k:'Payroll in view', v:compact(cost), u:'₹ allocated to this slice', cls:'money',
-     dl:d(byMonth.map(x=>x.co)), sp:byMonth.map(x=>x.co), col:'var(--cost)', dgood:-1},
-    {k:'Cost per image', v:money2(images?cost/images:null), u:'salary ÷ images', cls:'money',
-     dl:d(byMonth.map(x=>x.cpi)), sp:byMonth.map(x=>x.cpi), col:'var(--cost)', dgood:-1},
-    {k:'Cost per SKU', v:money2(skus?cost/skus:null), u:'salary ÷ vehicles', cls:'money',
-     dl:d(byMonth.map(x=>x.cps)), sp:byMonth.map(x=>x.cps), col:'var(--cost)', dgood:-1},
-    {k:'Images per QC-day', v:nf(qcDays?sum(matched,'images')/qcDays:null), u:'across active days', cls:'vol',
-     dl:d(byMonth.map(x=>x.days?x.im/x.days:0)), sp:byMonth.map(x=>x.days?x.im/x.days:0), col:'var(--vol)', dgood:1},
-    {k:'Output with no salary', v:images?((unmatchedImg/images)*100).toFixed(1)+'%':'—',
-     u:compact(unmatchedImg)+' images unmatched', cls:unmatchedImg?'alert':'',
-     dl:null, sp:byMonth.map(x=>0), col:'var(--warn)', dgood:-1},
-  ];
-
-  document.getElementById('bigCPI').textContent = money2(images?cost/images:null);
-  document.getElementById('ledger').innerHTML = cards.map(c=>{
-    let dh='';
-    if(c.dl!=null && isFinite(c.dl)){
-      const good = (c.dl>=0?1:-1)===c.dgood;
-      const cls = Math.abs(c.dl)<0.5 ? 'flat' : (good?'up':'down');
-      dh = `<span class="delta ${cls}">${pct(c.dl)}</span>`;
-    }
-    return `<div class="cell ${c.cls}">
-      <div class="k">${c.k}</div>
-      <div class="v">${c.v}${dh}</div>
-      <div class="u">${c.u}</div>
-      ${c.sp && c.sp.some(v=>v) ? sparkline(c.sp,c.col) : ''}
-    </div>`;
-  }).join('');
-}
-
-/* ==================================================================
-   Trend chart
-   ================================================================== */
-function renderTrend(rows){
-  const svg = document.getElementById('trend');
-  const W=720,H=250,PL=54,PR=54,PT=16,PB=30;
-  const months = MONTHS.filter(m=>DATA.fact.some(r=>r.month_key===m));
-  const data = months.map(m=>{
-    const rr = rows.filter(r=>r.month_key===m);
-    const im=sum(rr,'images'), co=sum(rr,'cost');
-    return {m,im,co,cpi:im?co/im:0,skus:sum(rr,'skus')};
-  });
-  if(!data.length){svg.innerHTML='';return;}
-  const iw=W-PL-PR, ih=H-PT-PB;
-  const maxI = Math.max(...data.map(d=>d.im),1);
-  const maxC = Math.max(...data.map(d=>d.cpi),0.01);
-  const bw = Math.min(64, iw/data.length*0.5);
-  const cx = i => PL + iw*((i+0.5)/data.length);
-  const yI = v => PT+ih - v/maxI*ih;
-  const yC = v => PT+ih - v/maxC*ih*0.86;
-
-  let s='';
-  for(let g=0;g<=4;g++){
-    const y=PT+ih-ih*g/4;
-    s+=`<line class="gl" x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}"/>`;
-    s+=`<text class="ax" x="${PL-8}" y="${y+3}" text-anchor="end">${compact(maxI*g/4)}</text>`;
-    s+=`<text class="ax" x="${W-PR+8}" y="${y+3}" fill="var(--cost-2)">${(maxC*0.86*g/4).toFixed(1)}</text>`;
-  }
-  data.forEach((d,i)=>{
-    const on = F.month.has(d.m) || F.month.size===0;
-    s+=`<rect class="hit mbar" data-m="${esc(d.m)}" x="${cx(i)-bw/2}" y="${yI(d.im)}" width="${bw}"
-         height="${Math.max(1,PT+ih-yI(d.im))}" fill="var(--vol)" opacity="${on?1:.28}" rx="1"/>`;
-    s+=`<text class="ax" x="${cx(i)}" y="${H-10}" text-anchor="middle" fill="${F.month.has(d.m)?'var(--ink)':'var(--muted)'}">${esc(d.m)}</text>`;
-  });
-  const lp = data.map((d,i)=>`${cx(i)},${yC(d.cpi)}`).join(' ');
-  s+=`<polyline points="${lp}" fill="none" stroke="var(--cost)" stroke-width="2" stroke-linejoin="round"/>`;
-  data.forEach((d,i)=>{
-    s+=`<circle cx="${cx(i)}" cy="${yC(d.cpi)}" r="4" fill="var(--surface)" stroke="var(--cost)" stroke-width="2"/>`;
-    s+=`<text class="ax" x="${cx(i)}" y="${yC(d.cpi)-11}" text-anchor="middle" fill="var(--cost)" font-weight="600">${money2(d.cpi)}</text>`;
-  });
-  svg.innerHTML = s;
-  svg.querySelectorAll('.mbar').forEach(el=>{
-    const d = data.find(x=>x.m===el.dataset.m);
-    bindTip(el, `<div><b>${esc(d.m)}</b></div>Images <b>${nf(d.im)}</b><br>SKUs <b>${nf(d.skus)}</b><br>Payroll <b>${money(d.co)}</b><br>Cost/image <b>${money2(d.cpi)}</b>`);
-    el.addEventListener('click', ()=>{ F.month.has(d.m)?F.month.delete(d.m):F.month.add(d.m); render(); });
+/* ==========================================================================
+   4. DATA IN
+   ========================================================================== */
+function getToken(){
+  return new Promise((resolve, reject) => {
+    if (!CONFIG.clientId) return reject(new Error(
+      "No OAuth client ID set. Add one to CONFIG.clientId near the top of this file."));
+    if (!window.google?.accounts?.oauth2) return reject(new Error(
+      "Google sign-in hasn't loaded yet. Wait a moment and try again."));
+    google.accounts.oauth2.initTokenClient({
+      client_id: CONFIG.clientId,
+      scope: "https://www.googleapis.com/auth/bigquery.readonly",
+      callback: r => r.access_token ? resolve(r.access_token) : reject(new Error("Sign-in was cancelled."))
+    }).requestAccessToken();
   });
 }
 
-/* ==================================================================
-   Split bars
-   ================================================================== */
-function renderSplits(rows){
-  const defs = [['dealer_type','Dealer type'],['product','Product'],['work_type','Work type']];
-  const shades = ['var(--vol)','var(--vol-2)','var(--cost-2)','var(--cost)','#5D7C86','#9DAFB4'];
-  document.getElementById('splits').innerHTML = defs.map(([col,label])=>{
-    const groups = rollup(rows,r=>r[col]).sort((a,b)=>b.cost-a.cost||b.images-a.images);
-    const tot = groups.reduce((a,g)=>a+g.cost,0) || groups.reduce((a,g)=>a+g.images,0) || 1;
-    const val = g => g.cost || g.images;
-    return `<div class="split"><div class="st">${label}</div>
-      <div class="sbar">${groups.map((g,i)=>
-        `<div data-k="${esc(col)}" data-v="${esc(g.key)}" style="width:${(val(g)/tot*100).toFixed(2)}%;background:${shades[i%shades.length]}"></div>`).join('')}</div>
-      <div class="skey">${groups.map((g,i)=>
-        `<span><i style="background:${shades[i%shades.length]}"></i>${esc(g.key)}<b>${(val(g)/tot*100).toFixed(0)}%</b></span>`).join('')}</div>
-    </div>`;
-  }).join('');
-  document.querySelectorAll('.sbar div').forEach(el=>{
-    const g = rollup(rows,r=>r[el.dataset.k]).find(x=>x.key===el.dataset.v);
-    if(g) bindTip(el, `<div><b>${esc(g.key)}</b></div>Images <b>${nf(g.images)}</b><br>Payroll <b>${money(g.cost)}</b><br>Cost/image <b>${money2(g.cpi)}</b>`);
-  });
+async function bq(sql){
+  const res = await fetch(
+    `https://bigquery.googleapis.com/bigquery/v2/projects/${CONFIG.project}/queries`,
+    { method:"POST",
+      headers:{ Authorization:"Bearer "+S.token, "Content-Type":"application/json" },
+      body: JSON.stringify({ query:sql, useLegacySql:false, timeoutMs:180000, maxResults:100000 }) });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error?.message || `BigQuery returned ${res.status}`);
+  if (!data.jobComplete) throw new Error("Query is still running — press Run query again in a moment.");
+  const cols = (data.schema?.fields || []).map(f => f.name);
+  return (data.rows || []).map(r => { const o = {}; cols.forEach((c,i) => o[c] = r.f[i].v); return o; });
 }
 
-/* ==================================================================
-   Drill-down
-   ================================================================== */
-function renderDrill(rows){
-  const levels = [
-    {key:'enterprise', label:'Enterprise', next:'team_name'},
-    {key:'team_name',  label:'Team',       next:'qc_email'},
-    {key:'qc_email',   label:'QC',         next:null},
-    {key:'month_key',  label:'Month',      next:null},
-  ];
-  const lv = levels[Math.min(drill.level,3)];
-  const groups = rollup(rows, r=>r[lv.key]);
-  const avgCpi = sum(rows,'images') ? sum(rows,'cost')/sum(rows,'images') : 0;
-
-  groups.sort((a,b)=>{
-    if(drillSort==='cpi') return (b.cpi==null?-1:b.cpi)-(a.cpi==null?-1:a.cpi);
-    return b[drillSort]-a[drillSort];
-  });
-  const top = groups.slice(0,18);
-  const maxV = Math.max(...top.map(g=>g.images),1);
-
-  // breadcrumb
-  const parts = [`<button data-lvl="0">All work</button>`];
-  if(drill.enterprise) parts.push(`<span>›</span>`,`<button data-lvl="1">${esc(drill.enterprise)}</button>`);
-  if(drill.team_name)  parts.push(`<span>›</span>`,`<button data-lvl="2">${esc(drill.team_name)}</button>`);
-  if(drill.qc_email)   parts.push(`<span>›</span>`,`<em>${esc(drill.qc_email)}</em>`);
-  parts.push(`<span style="margin-left:8px;color:var(--faint)">showing ${lv.label.toLowerCase()}${groups.length>18?' · top 18 of '+groups.length:''}</span>`);
-  const cr = document.getElementById('crumb');
-  cr.innerHTML = parts.join('');
-  cr.querySelectorAll('button').forEach(b=>b.addEventListener('click',()=>{
-    const l = +b.dataset.lvl;
-    if(l===0) drill={level:0,enterprise:null,team_name:null,qc_email:null};
-    if(l===1) drill={level:1,enterprise:drill.enterprise,team_name:null,qc_email:null};
-    if(l===2) drill={level:2,enterprise:drill.enterprise,team_name:drill.team_name,qc_email:null};
-    render();
-  }));
-
-  const host = document.getElementById('drill');
-  if(!top.length){host.innerHTML='<div class="empty">No rows match these filters.</div>';return;}
-
-  host.innerHTML = top.map(g=>{
-    let chip = '<span class="chip na">no salary</span>';
-    if(g.cpi!=null && avgCpi){
-      const rel = (g.cpi-avgCpi)/avgCpi*100;
-      chip = `<span class="chip ${rel>0?'bad':'good'}">${money2(g.cpi)} ${rel>0?'▲':'▼'}${Math.abs(rel).toFixed(0)}%</span>`;
-    }
-    let name = g.key;
-    if(lv.key==='qc_email'){
-      const p = g.rows.find(r=>r.emp_name); name = p ? p.emp_name : g.key;
-    }
-    return `<div class="row ${lv.next?'':'nodrill'}" data-v="${esc(g.key)}">
-      <div class="lab">
-        <div class="bar" style="width:${Math.max(2,(g.images/maxV*100)).toFixed(1)}%"><i style="width:100%"></i></div>
-        <span title="${esc(g.key)}">${esc(name)}</span>
-      </div>
-      <div class="num">${compact(g.images)}</div>
-      ${chip}
-    </div>`;
-  }).join('');
-
-  host.querySelectorAll('.row').forEach(el=>{
-    const g = top.find(x=>String(x.key)===el.dataset.v);
-    bindTip(el, `<div><b>${esc(g.key)}</b></div>Images <b>${nf(g.images)}</b><br>SKUs <b>${nf(g.skus)}</b><br>
-      Payroll <b>${money(g.cost)}</b><br>Cost/image <b>${money2(g.cpi)}</b><br>QCs <b>${g.qcs}</b>
-      ${lv.next?'<br><span style="color:#8FA8A3">Click to drill in</span>':''}`);
-    if(!lv.next) return;
-    el.addEventListener('click',()=>{
-      if(lv.key==='enterprise'){drill.enterprise=g.key;drill.level=1;}
-      else if(lv.key==='team_name'){drill.team_name=g.key;drill.level=2;}
-      hideTip(); render();
-    });
-  });
+async function runQuery(){
+  const btn = document.getElementById("btn-run");
+  btn.disabled = true; btn.textContent = "Running…"; clearBanners();
+  try{
+    if (!S.token) S.token = await getToken();
+    const [a,b,c] = await Promise.all([
+      bq(document.getElementById("sql-a").value),
+      bq(document.getElementById("sql-b").value),
+      bq(document.getElementById("sql-c").value)
+    ]);
+    S.daily = a.map(normDaily); S.teams = b.map(normTeam); S.excluded = c.map(normExcl);
+    afterLoad("BigQuery");
+  }catch(e){
+    S.token = null;
+    banner(`<b>Query didn't run.</b> ${esc(e.message)}`);
+  }finally{ btn.disabled = false; btn.textContent = "Run query"; }
 }
 
-/* ==================================================================
-   Scatter — salary vs output
-   ================================================================== */
-function renderScatter(rows){
-  const svg=document.getElementById('scatter');
-  const W=520,H=320,PL=54,PR=16,PT=14,PB=40;
-  const pts = rollup(rows.filter(r=>r.is_matched), r=>r.qc_email+'|'+r.month_key).map(g=>{
-    const r0=g.rows[0];
-    return {mail:r0.qc_email,name:r0.emp_name,month:r0.month_key,
-            sal:r0.qc_month_salary,images:g.images,skus:g.skus,cost:g.cost,cpi:g.cpi};
-  }).filter(p=>p.sal);
-  if(!pts.length){svg.innerHTML='<text class="ax" x="20" y="30">Nothing to plot.</text>';return;}
-  const iw=W-PL-PR, ih=H-PT-PB;
-  const mxS=Math.max(...pts.map(p=>p.sal))*1.06, mxI=Math.max(...pts.map(p=>p.images))*1.08;
-  const X=v=>PL+v/mxS*iw, Y=v=>PT+ih-v/mxI*ih;
-  const cpis=pts.map(p=>p.cpi).sort((a,b)=>a-b);
-  const q1=cpis[Math.floor(cpis.length*.25)], q3=cpis[Math.floor(cpis.length*.75)];
-
-  let s='';
-  for(let g=0;g<=4;g++){
-    const y=PT+ih-ih*g/4;
-    s+=`<line class="gl" x1="${PL}" y1="${y}" x2="${W-PR}" y2="${y}"/>`;
-    s+=`<text class="ax" x="${PL-8}" y="${y+3}" text-anchor="end">${compact(mxI*g/4)}</text>`;
-  }
-  for(let g=0;g<=4;g++){
-    const x=PL+iw*g/4;
-    s+=`<text class="ax" x="${x}" y="${H-20}" text-anchor="middle">${compact(mxS*g/4)}</text>`;
-  }
-  s+=`<text class="ax" x="${PL+iw/2}" y="${H-4}" text-anchor="middle">Monthly salary (₹)</text>`;
-  s+=`<text class="ax" x="12" y="${PT+ih/2}" text-anchor="middle" transform="rotate(-90 12 ${PT+ih/2})">Images</text>`;
-
-  pts.forEach((p,i)=>{
-    const col = p.cpi<=q1?'var(--vol)' : (p.cpi>=q3?'var(--cost)':'var(--vol-2)');
-    const r = 3.5 + Math.sqrt(p.skus)/13;
-    s+=`<circle class="hit dot" data-i="${i}" cx="${X(p.sal).toFixed(1)}" cy="${Y(p.images).toFixed(1)}"
-         r="${Math.min(13,r).toFixed(1)}" fill="${col}" fill-opacity=".5" stroke="${col}" stroke-width="1.3"/>`;
-  });
-  svg.innerHTML=s;
-  svg.querySelectorAll('.dot').forEach(el=>{
-    const p=pts[+el.dataset.i];
-    bindTip(el, `<div><b>${esc(p.name||p.mail)}</b> · ${esc(p.month)}</div>
-      Salary <b>${money(p.sal)}</b><br>Images <b>${nf(p.images)}</b><br>SKUs <b>${nf(p.skus)}</b><br>
-      Cost/image <b>${money2(p.cpi)}</b><br><span style="color:#8FA8A3">Click to focus</span>`);
-    el.addEventListener('click',()=>{F.qc=p.mail;hideTip();render();});
-  });
-}
-
-/* ==================================================================
-   Heatmap
-   ================================================================== */
-function renderHeat(){
-  const host=document.getElementById('heat');
-  let hs = DATA.heat;
-  if(F.month.size) hs = hs.filter(h=>F.month.has(h.month_key));
-  const grid={}; let mx=0;
-  hs.forEach(h=>{const k=(h.work_dow-1)+'|'+h.work_hour; grid[k]=(grid[k]||0)+h.images; mx=Math.max(mx,grid[k]);});
-  let out='<div></div>';
-  for(let h=0;h<24;h++) out+=`<div class="hh">${h%3===0?h:''}</div>`;
-  for(let d=0;d<7;d++){
-    out+=`<div class="rl">${DOW[d]}</div>`;
-    for(let h=0;h<24;h++){
-      const v=grid[d+'|'+h]||0, a=mx?v/mx:0;
-      out+=`<div class="c" data-d="${d}" data-h="${h}" data-v="${v}"
-            style="background:${a?`color-mix(in srgb, var(--vol) ${(a*100).toFixed(0)}%, var(--vol-tint))`:'var(--soft)'}"></div>`;
-    }
-  }
-  host.innerHTML=out;
-  host.querySelectorAll('.c').forEach(el=>{
-    bindTip(el, `<div><b>${DOW[+el.dataset.d]} ${String(el.dataset.h).padStart(2,'0')}:00</b></div>Images <b>${nf(+el.dataset.v)}</b>`);
-  });
-}
-
-/* ==================================================================
-   Table
-   ================================================================== */
-const COLS = [
-  {k:'who',   t:'QC',            n:false},
-  {k:'month', t:'Month',         n:false},
-  {k:'sal',   t:'Monthly salary',n:true, f:money,  money:true},
-  {k:'images',t:'Images',        n:true, f:nf},
-  {k:'skus',  t:'SKUs',          n:true, f:nf},
-  {k:'tool',  t:'Tool count',    n:true, f:nf},
-  {k:'target',t:'Target units',  n:true, f:nf1},
-  {k:'days',  t:'Active days',   n:true, f:nf},
-  {k:'perday',t:'Images / day',  n:true, f:nf},
-  {k:'cost',  t:'Allocated ₹',   n:true, f:money,  money:true},
-  {k:'cpi',   t:'Cost / image',  n:true, f:money2, money:true},
-  {k:'cps',   t:'Cost / SKU',    n:true, f:money2, money:true},
-];
-
-function tableRows(rows){
-  return rollup(rows, r=>r.qc_email+'|'+r.month_key).map(g=>{
-    const r0=g.rows[0], days=sum(g.rows,'active_days');
-    return {who:r0.emp_name||r0.qc_email, mail:r0.qc_email, emp:r0.emp_no,
-            month:r0.month_key, sal:r0.qc_month_salary,
-            images:g.images, skus:g.skus, tool:g.tool, target:g.target,
-            days, perday:days?g.images/days:null,
-            cost:g.cost||null, cpi:g.cpi, cps:g.cps, matched:r0.is_matched};
-  });
-}
-
-function renderTable(rows){
-  const data = tableRows(rows);
-  data.sort((a,b)=>{
-    const A=a[tblSort.key], B=b[tblSort.key];
-    if(A==null) return 1; if(B==null) return -1;
-    if(typeof A==='string') return A.localeCompare(B)*tblSort.dir*-1;
-    return (A-B)*tblSort.dir;
-  });
-  const tbl=document.getElementById('tbl');
-  tbl.querySelector('thead').innerHTML = '<tr>'+COLS.map(c=>
-    `<th class="${c.n?'n':''}${tblSort.key===c.k?' sorted'+(tblSort.dir===1?' asc':''):''}" data-k="${c.k}">${c.t}</th>`).join('')+'</tr>';
-  tbl.querySelector('tbody').innerHTML = data.length ? data.map(r=>'<tr>'+COLS.map(c=>{
-    if(c.k==='who') return `<td class="who2">${esc(r.who)}<em>${esc(r.emp||'no payroll match')} · ${esc(r.mail)}</em></td>`;
-    if(c.k==='month') return `<td>${esc(r.month)}</td>`;
-    return `<td class="${c.money?'money':'n'}">${c.f(r[c.k])}</td>`;
-  }).join('')+'</tr>').join('') : `<tr><td colspan="${COLS.length}" class="empty">No rows match these filters.</td></tr>`;
-  document.getElementById('tblCount').textContent = data.length+' QC-month rows in view.';
-  tbl.querySelectorAll('th').forEach(th=>th.addEventListener('click',()=>{
-    const k=th.dataset.k;
-    tblSort = (tblSort.key===k) ? {key:k,dir:-tblSort.dir} : {key:k,dir:-1};
-    renderTable(filtered());
-  }));
-  window.__tblData = data;
-}
-
-document.getElementById('csv').addEventListener('click',()=>{
-  const d=window.__tblData||[];
-  const head=['QC','Employee No','Email','Month','Monthly Salary','Images','SKUs','Tool Count','Target','Active Days','Images per Day','Allocated Cost','Cost per Image','Cost per SKU'];
-  const lines=[head.join(',')].concat(d.map(r=>[r.who,r.emp||'',r.mail,r.month,r.sal||'',r.images,r.skus,r.tool,
-    (r.target||0).toFixed(2),r.days,(r.perday||0).toFixed(1),(r.cost||0).toFixed(2),(r.cpi||0).toFixed(4),(r.cps||0).toFixed(4)]
-    .map(v=>`"${String(v).replace(/"/g,'""')}"`).join(',')));
-  const url=URL.createObjectURL(new Blob([lines.join('\n')],{type:'text/csv;charset=utf-8'}));
-  const a=document.createElement('a');
-  a.href=url; a.download='qc_cost_'+new Date().toISOString().slice(0,10)+'.csv'; a.click();
-  URL.revokeObjectURL(url);
+const num = v => v == null || v === "" ? null : Number(v);
+const normDaily = o => ({
+  month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
+  name:o.name || (o.email||"").split("@")[0], emp_no:o.emp_no||"",
+  match_type:o.match_type||"none", work_date:String(o.work_date||"").slice(0,10),
+  hours:num(o.hours)||0, images:num(o.images)||0,
+  tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
+  month_salary:num(o.month_salary), month_images:num(o.month_images)||0,
+  allocated_cost:num(o.allocated_cost)
+});
+const normTeam = o => ({
+  month_key:o.month_key||"", team_id:(o.team_id||"").toLowerCase(),
+  team_name:o.team_name||"—", enterprise:o.enterprise||"—",
+  enterprise_id:o.enterprise_id||"", dealer_type:o.dealer_type||"UNKNOWN",
+  segment:o.segment||"", people:num(o.people)||0,
+  images:num(o.images)||0, unpriced_images:num(o.unpriced_images)||0,
+  allocated_cost:num(o.allocated_cost)||0,
+  vins:num(o.vins), acc_images:num(o.acc_images),
+  true_accuracy:num(o.true_accuracy)
+});
+const normExcl = o => ({
+  month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
+  images:num(o.images)||0, hours:num(o.hours)||0
 });
 
-/* ==================================================================
-   Join gaps
-   ================================================================== */
-function renderGaps(){
-  let g = DATA.gaps;
-  if(F.month.size) g = g.filter(x=>F.month.has(x.month_key));
-  const a = g.filter(x=>x.gap_type==='output_without_salary').sort((p,q)=>q.images-p.images);
-  const b = g.filter(x=>x.gap_type==='salary_without_output').sort((p,q)=>q.salary-p.salary);
-  const list = (arr,fmt,empty) => arr.length
-    ? `<div class="gap-list">${arr.map(x=>`<div><span>${esc(x.emp_name||x.qc_email)}</span>
-        <span style="color:var(--faint);font-family:var(--mono);font-size:11px">${esc(x.month_key)}</span>
-        <b>${fmt(x)}</b></div>`).join('')}</div>`
-    : `<div class="empty">${empty}</div>`;
-  document.getElementById('gaps').innerHTML = `
-    <div><div class="st" style="font-family:var(--disp);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--warn);margin-bottom:7px">
-      Output with no payroll row — ${a.length}</div>
-      ${list(a,x=>nf(x.images)+' img','Every QC in delivery data has a matching salary row.')}</div>
-    <div><div class="st" style="font-family:var(--disp);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.1em;color:var(--cost);margin-bottom:7px">
-      Payroll with no output — ${b.length}</div>
-      ${list(b,x=>money(x.salary),'Everyone on payroll produced output.')}</div>`;
+async function loadJson(){
+  try{
+    const r = await fetch(CONFIG.jsonFallback, {cache:"no-store"});
+    if (!r.ok) return false;
+    const j = await r.json();
+    if (!j.daily?.length) return false;
+    S.daily = j.daily.map(normDaily);
+    S.teams = (j.teams||[]).map(normTeam);
+    S.excluded = (j.excluded||[]).map(normExcl);
+    afterLoad(CONFIG.jsonFallback);
+    return true;
+  }catch(e){ return false; }
 }
 
-/* ==================================================================
-   Render all
-   ================================================================== */
+function sample(){
+  const people = [
+    ["Adarsh Singh","adarsh.singh@spyne.co.in","E6558"],["Ajay Prajapati","ajay.prajapati@spyne.co.in","E6198"],
+    ["Ajeet Kumar","ajit.yadav@spyne.co.in","E6181"],["Akshay Kumar Jha","akshay.jha@spyne.co.in","E6539"],
+    ["Ankesh Raj","ankesh.raj@spyne.co.in","E6460"],["Ankit Sharma","ankit.sharma@spyne.co.in","E6542"],
+    ["Rafil Khan","rafil.khan@spyne.co.in","E6611"],["Sahil Kumar","sahil.kumar@spyne.co.in","E6620"],
+    ["Sahil Malik","sahil.malik@spyne.co.in","E6631"],["Mukul Ray","mukul.ray@spyne.co.in","E6644"],
+    ["Chhotu Singh","chhotu.singh@spyne.co.in","E6650"],["Pradeep Singh","pradeep.singh@spyne.co.in","E6661"],
+    ["Rambha Prajapati","rambha.prajapati@spyne.co.in","E6670"],["Kavi Singh","kavi.singh@spyne.co.in","E6682"],
+    ["Samir Ansari","samir.ansari@spyne.co.in","E6690"],["Lalit Shukla","lalit.shukla@spyne.co.in","E6701"],
+    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],
+    ["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"]
+  ];
+  const roofs = [
+    ["Bentley Tampa Bay","11df1566a","dimmitt automotive","9dd9791eb","FRANCHISE","Ent"],
+    ["Gaye Chevrolet","d9eebfaf14","Gaye Chevrolet","0b37725f8","FRANCHISE","SMB"],
+    ["Dellenbach","43b96ab81","Dellenbach Motors","914365f63","FRANCHISE","Ent"],
+    ["4season Motors Llc","f586ec34ab","4 Season Motors LLC","e89409525","INDEPENDENT","SMB"],
+    ["4M Autoplex","8c0048630f","4M Autoplex","bafd919bb","OTHERS","SMB"],
+    ["ASK Motors","8dec940d38","ASK Motors","6671ea5b6","INDEPENDENT","SMB"],
+    ["AX Auto INC","cfe0d77a59","AX Auto INC","2b8948cea","INDEPENDENT","SMB"],
+    ["Al Piemonte Buick GMC","133218a6aa","Al Piemonte","ec7fa01a5","OTHERS","Ent"],
+    ["Adams Chevrolet","397eeed15","Adams Chevrolet Inc","442e5dc24","FRANCHISE","Ent"],
+    ["615 Auto Sales","6eb794982","615 Auto Sales INC","a3a20bdb2","INDEPENDENT","SMB"]
+  ];
+  const months = ["2026-04","2026-05","2026-06","2026-07"];
+  const daily = [], teams = [];
+
+  people.forEach((p,pi) => {
+    const speed = 0.6 + ((pi*29)%100)/100 * 0.95;
+    months.forEach((mk,mi) => {
+      const base = 19000 + (pi%7)*5200;
+      const salary = pi === people.length-1 ? null : Math.round(base*(0.88+((pi+mi)%5)*0.06));
+      const days = [];
+      for (let d=1; d<=26; d++){
+        const dt = `${mk}-${String(d).padStart(2,"0")}`;
+        if (new Date(dt).getDay() === 0) continue;
+        const hrs = 7 + ((pi+d)%3);
+        days.push({dt, hrs, images: Math.round(hrs*47*speed)});
+      }
+      const mImgs = days.reduce((a,x)=>a+x.images,0);
+      const mHrs  = days.reduce((a,x)=>a+x.hrs,0);
+      const rate  = salary ? salary/mImgs : null;
+      days.forEach(x => daily.push({
+        month_key:mk, email:p[1], name:p[0], emp_no:p[2],
+        match_type: salary ? "email" : "none", work_date:x.dt,
+        hours:x.hrs, images:x.images,
+        tool_count:Math.round(x.images*0.12), sku_count:Math.round(x.images/9),
+        month_salary:salary, month_images:mImgs, month_hours:mHrs,
+        allocated_cost: rate ? +(x.images*rate).toFixed(4) : null
+      }));
+    });
+  });
+
+  const pmRate = {};
+  daily.forEach(d => { if (d.allocated_cost != null)
+    pmRate[d.email+"|"+d.month_key] = d.allocated_cost / d.images; });
+  const rates = Object.values(pmRate);
+  const avgRate = rates.reduce((a,b)=>a+b,0) / rates.length;
+
+  roofs.forEach((r,ri) => months.forEach((mk,mi) => {
+    const images = 2400 + ((ri*7+mi*13)%9)*900;
+    const rate = avgRate * (0.72 + ((ri*31+mi*17)%100)/100 * 0.85);
+    const hasAcc = !(ri === 7 && mi > 1);        // one rooftop missing accuracy
+    teams.push({
+      month_key:mk, team_id:r[1], team_name:r[0], enterprise:r[2], enterprise_id:r[3],
+      dealer_type:r[4], segment:r[5], people:2+(ri%4),
+      images, unpriced_images: ri===3 ? Math.round(images*0.1) : 0,
+      allocated_cost:+(images*rate).toFixed(2),
+      vins: hasAcc ? 12+((ri*5+mi*3)%46) : null,
+      acc_images: hasAcc ? Math.round(images*0.42) : null,
+      true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
+    });
+  }));
+
+  const excluded = [];
+  ["raj.tripathi@spyne.ai","rafil.khan@spyne.ai","lalit.shukla@spyne.ai"].forEach((e,i) =>
+    months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
+
+  return {daily, teams, excluded};
+}
+
+/* ==========================================================================
+   5. AGGREGATE
+   ========================================================================== */
+const mFilter = () => document.getElementById("f-month").value;
+const sFilter = () => document.getElementById("f-seg").value;
+const qFilter = () => document.getElementById("f-search").value.trim().toLowerCase();
+
+function dailyView(){
+  const m = mFilter(), q = qFilter();
+  return S.daily.filter(r => (!m || r.month_key === m) &&
+    (!q || r.name.toLowerCase().includes(q) || r.email.includes(q)));
+}
+function teamView(){
+  const m = mFilter(), sg = sFilter(), q = qFilter();
+  return S.teams.filter(r => (!m || r.month_key === m) && (!sg || r.segment === sg) &&
+    (!q || r.team_name.toLowerCase().includes(q) || r.enterprise.toLowerCase().includes(q)));
+}
+
+function byPersonMonth(rows){
+  const m = new Map();
+  for (const r of rows){
+    const k = r.email + "|" + r.month_key;
+    let p = m.get(k);
+    if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
+      match_type:r.match_type, salary:r.month_salary, images:0, hours:0, days:0, cost:0,
+      priced:r.allocated_cost != null});
+    p.images += r.images; p.hours += r.hours; p.days += 1;
+    if (r.allocated_cost != null) p.cost += r.allocated_cost;
+  }
+  return [...m.values()].map(p => ({...p,
+    iph: p.hours ? p.images/p.hours : 0,
+    cpi: p.priced && p.images ? p.cost/p.images : null }));
+}
+function byPerson(pms){
+  const m = new Map();
+  for (const p of pms){
+    let x = m.get(p.email);
+    if (!x) m.set(p.email, x = {email:p.email, name:p.name, emp_no:p.emp_no,
+      match_type:p.match_type, months:0, images:0, hours:0, days:0, cost:0, pricedImages:0});
+    x.months++; x.images += p.images; x.hours += p.hours; x.days += p.days;
+    if (p.cpi != null){ x.cost += p.cost; x.pricedImages += p.images; }
+    if (p.match_type === "email") x.match_type = "email";
+  }
+  return [...m.values()].map(x => ({...x,
+    iph: x.hours ? x.images/x.hours : 0,
+    cpi: x.pricedImages ? x.cost/x.pricedImages : null }));
+}
+
+/* accuracy is a rate — always weight by the image count it was measured over */
+function weightedAccuracy(rows){
+  let num = 0, den = 0;
+  for (const r of rows){
+    if (r.true_accuracy == null || !r.acc_images) continue;
+    num += r.true_accuracy * r.acc_images; den += r.acc_images;
+  }
+  return den ? num/den : null;
+}
+
+function rollTeams(rows, keyFn, labelFn){
+  const m = new Map();
+  for (const r of rows){
+    const k = keyFn(r);
+    let x = m.get(k);
+    if (!x) m.set(k, x = {key:k, ...labelFn(r), rooftops:new Set(), months:new Set(),
+      people:0, images:0, priced:0, cost:0, accNum:0, accDen:0, vins:0, rows:0});
+    x.rooftops.add(r.team_id); x.months.add(r.month_key);
+    x.people = Math.max(x.people, r.people);
+    x.images += r.images; x.priced += r.images - r.unpriced_images;
+    x.cost += r.allocated_cost; x.rows++;
+    if (r.true_accuracy != null && r.acc_images){
+      x.accNum += r.true_accuracy * r.acc_images; x.accDen += r.acc_images;
+    }
+    if (r.vins) x.vins += r.vins;
+  }
+  return [...m.values()].map(x => ({...x,
+    rooftops: x.rooftops.size, months: x.months.size,
+    cpi: x.priced ? x.cost/x.priced : null,
+    accuracy: x.accDen ? x.accNum/x.accDen : null }));
+}
+
+function totals(pms, teams){
+  const cost = pms.reduce((a,p) => a + p.cost, 0);
+  const pricedImages = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
+  return { cost, pricedImages,
+    images: pms.reduce((a,p) => a + p.images, 0),
+    hours : pms.reduce((a,p) => a + p.hours, 0),
+    heads : new Set(pms.map(p => p.email)).size,
+    accounts: new Set(teams.map(t => t.enterprise)).size,
+    rooftops: new Set(teams.map(t => t.team_id)).size,
+    vins: teams.reduce((a,t) => a + (t.vins||0), 0),
+    accuracy: weightedAccuracy(teams),
+    blended: pricedImages ? cost/pricedImages : 0 };
+}
+
+/* ==========================================================================
+   6. RENDER
+   ========================================================================== */
 function render(){
-  const rows = filtered();
-  renderFilters();
-  renderLedger(rows);
-  renderTrend(rows);
-  renderSplits(rows);
-  renderDrill(rows);
-  renderScatter(rows);
-  renderHeat();
-  renderTable(rows);
-  renderGaps();
+  const rows = dailyView(), teams = teamView();
+  const pms = byPersonMonth(rows), T = totals(pms, teams);
+  renderHero(pms, T);
+  renderKpis(T);
+  renderScatter(teams, T);
+  renderCategories(teams, T);
+  renderTrend(rows, T);
+  renderTable(pms, teams, T);
 }
 
-document.querySelectorAll('[data-sort]').forEach(b=>b.addEventListener('click',()=>{
-  document.querySelectorAll('[data-sort]').forEach(x=>x.classList.remove('act'));
-  b.classList.add('act'); drillSort=b.dataset.sort; renderDrill(filtered());
+function renderHero(pms, T){
+  document.getElementById("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
+  document.getElementById("hero-unit").textContent = T.blended
+    ? `per image · ${int(T.pricedImages)} images priced` : "";
+  const svg = document.getElementById("strip");
+  const pr = pms.filter(p => p.cpi != null && p.images > 0).sort((a,b) => a.cpi - b.cpi);
+  if (!pr.length){ svg.innerHTML = ""; return; }
+
+  const W = svg.clientWidth || 900, H = 100, base = 64;
+  const lo = pr[0].cpi;
+  const hi = pr[Math.min(pr.length-1, Math.floor(pr.length*0.97))].cpi * 1.05;
+  const x = v => 4 + (Math.min(v,hi)-lo)/Math.max(hi-lo,1e-9)*(W-8);
+  const maxImg = Math.max(...pr.map(p => p.images));
+
+  let s = `<line x1="0" y1="${base}" x2="${W}" y2="${base}" stroke="var(--rule)"/>`;
+  pr.forEach(p => {
+    const h = 10 + (p.images/maxImg)*44;
+    s += `<g class="tick"><title>${esc(p.name)} · ${p.month_key}\n${money(p.cpi)} per image · `
+       + `${int(p.images)} images · ${money(p.salary||0)} salary</title>`
+       + `<rect x="${x(p.cpi)-1.5}" y="${base-h}" width="3" height="${h}" rx="1" `
+       + `fill="${costColor(p.cpi/T.blended)}" opacity=".78"/></g>`;
+  });
+  const ax = x(T.blended);
+  s += `<line x1="${ax}" y1="6" x2="${ax}" y2="${base+8}" stroke="var(--ink)" stroke-dasharray="2 3"/>`
+     + `<text x="${ax}" y="${base+26}" text-anchor="${ax>W-70?"end":"middle"}" font-family="IBM Plex Mono" font-size="10" fill="var(--ink)">avg ${money(T.blended)}</text>`
+     + `<text x="0" y="${base+26}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(lo)}</text>`
+     + `<text x="${W}" y="${base+26}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(hi)}</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = s;
+
+  const spread = pr[pr.length-1].cpi / pr[0].cpi, top = pr[pr.length-1];
+  document.getElementById("hero-note").textContent =
+    `${pr.length} person-months priced. Costliest image runs ${dec(spread)}× the cheapest `
+    + `(${top.name}, ${top.month_key}, ${money(top.cpi)}). Hover any tick.`;
+}
+
+function renderKpis(T){
+  const items = [
+    ["Images", int(T.images), "in view"],
+    ["Allocated cost", money(T.cost), "salary spread over output"],
+    ["True accuracy", pct(T.accuracy), "image-weighted"],
+    ["Hours", int(T.hours), "distinct working hours"],
+    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"],
+    ["Cost / hour", T.hours ? money(T.cost/T.hours) : "—", "allocated"],
+    ["QC people", int(T.heads), "with output"],
+    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
+  ];
+  document.getElementById("kpis").innerHTML = items.map(([l,v,d]) =>
+    `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
+}
+
+/* the point of the whole join: cost on one axis, quality on the other */
+function renderScatter(teams, T){
+  const svg = document.getElementById("chart-scatter");
+  const pts = teams.filter(t => t.true_accuracy != null && t.images > 0 &&
+                                t.images > t.unpriced_images)
+                   .map(t => ({...t, cpi: t.allocated_cost/(t.images - t.unpriced_images)}));
+  document.getElementById("sc-n").textContent =
+    `${pts.length} of ${teams.length} team-months have an accuracy row`;
+  if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+
+  const W = svg.clientWidth || 1180, H = 380, padL = 54, padR = 16, padT = 16, padB = 40;
+  const pw = W-padL-padR, ph = H-padT-padB;
+  const accs = pts.map(p => p.true_accuracy).sort((a,b)=>a-b);
+  const cpis = pts.map(p => p.cpi).sort((a,b)=>a-b);
+  const xLo = Math.max(0, Math.floor(accs[0]/5)*5 - 2), xHi = 100;
+  const yHi = cpis[Math.floor(cpis.length*0.97)] * 1.12;
+  const X = v => padL + (v-xLo)/(xHi-xLo)*pw;
+  const Y = v => padT + ph - Math.min(v,yHi)/yHi*ph;
+  const maxImg = Math.max(...pts.map(p => p.images));
+  const midAcc = weightedAccuracy(pts), midCpi = T.blended;
+
+  let s = "";
+  for (let i=0; i<=4; i++){
+    const y = padT + ph*i/4;
+    s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
+       + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(yHi*(1-i/4))}</text>`;
+  }
+  for (let a=Math.ceil(xLo/10)*10; a<=100; a+=10){
+    s += `<text x="${X(a)}" y="${H-14}" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${a}%</text>`;
+  }
+  s += `<line x1="${X(midAcc)}" y1="${padT}" x2="${X(midAcc)}" y2="${padT+ph}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
+     + `<line x1="${padL}" y1="${Y(midCpi)}" x2="${W-padR}" y2="${Y(midCpi)}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
+     + `<text x="${padL+8}" y="${padT+14}" font-family="IBM Plex Sans Condensed" font-weight="700" font-size="10" letter-spacing=".1em" fill="var(--cost-high)">COSTLY AND INACCURATE</text>`;
+
+  s += pts.sort((a,b) => b.images - a.images).map(p => {
+    const r = 3 + Math.sqrt(p.images/maxImg)*13;
+    return `<g class="dot"><title>${esc(p.team_name)} · ${p.month_key}\n${esc(p.enterprise)}`
+      + `${p.segment?" · "+esc(p.segment):""}\n${money(p.cpi)} per image · ${pct(p.true_accuracy)} accurate`
+      + `\n${int(p.images)} images${p.vins?" · "+int(p.vins)+" VINs":""}</title>`
+      + `<circle cx="${X(p.true_accuracy)}" cy="${Y(p.cpi)}" r="${r}" `
+      + `fill="${costColor(p.cpi/(T.blended||1))}" opacity=".5"/></g>`;
+  }).join("");
+
+  s += `<text x="${W-padR}" y="${H-14}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">true accuracy →</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  svg.innerHTML = s;
+}
+
+function renderCategories(teams, T){
+  const svg = document.getElementById("chart-cat");
+  const rows = rollTeams(teams, r => r.dealer_type, r => ({label:r.dealer_type}))
+    .filter(r => r.priced > 0).sort((a,b) => b.cpi - a.cpi);
+  document.getElementById("cat-n").textContent = rows.length ? `${rows.length} dealer types` : "";
+  if (!rows.length){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+
+  const W = svg.clientWidth || 460, rowH = 52, H = rows.length*rowH + 8;
+  const labelW = Math.min(140, W*0.3), barMax = W-labelW-78;
+  const max = Math.max(...rows.map(r => r.cpi));
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  svg.innerHTML = rows.map((t,i) => {
+    const y = i*rowH+8, w = Math.max(2, t.cpi/max*barMax);
+    const accW = t.accuracy == null ? 0 : (t.accuracy/100)*barMax;
+    return `<text x="0" y="${y+14}" font-family="IBM Plex Sans Condensed" font-size="12" font-weight="600" fill="var(--ink)">${esc(t.label)}</text>`
+      + `<text x="0" y="${y+29}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(t.images)} img · ${t.rooftops} rooftops</text>`
+      + `<rect x="${labelW}" y="${y+4}" width="${w}" height="15" rx="1" fill="${costColor(t.cpi/(T.blended||1))}"/>`
+      + `<text x="${labelW+w+8}" y="${y+16}" font-family="IBM Plex Mono" font-size="11" fill="var(--ink)">${money(t.cpi)}</text>`
+      + (t.accuracy == null ? "" :
+          `<rect x="${labelW}" y="${y+25}" width="${barMax}" height="7" rx="1" fill="var(--rule-soft)"/>`
+        + `<rect x="${labelW}" y="${y+25}" width="${accW}" height="7" rx="1" fill="var(--steel-light)"/>`
+        + `<text x="${labelW+barMax+8}" y="${y+32}" font-family="IBM Plex Mono" font-size="11" fill="var(--steel)">${pct(t.accuracy)}</text>`);
+  }).join("");
+}
+
+function renderTrend(rows, T){
+  const svg = document.getElementById("chart-trend");
+  const m = new Map();
+  for (const r of rows){
+    const d = m.get(r.work_date) || {date:r.work_date, images:0, cost:0, priced:0};
+    d.images += r.images;
+    if (r.allocated_cost != null){ d.cost += r.allocated_cost; d.priced += r.images; }
+    m.set(r.work_date, d);
+  }
+  const days = [...m.values()].sort((a,b) => a.date.localeCompare(b.date))
+    .map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+  if (days.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+
+  const W = svg.clientWidth || 620, H = 248, padT = 12, padB = 26, padR = 48;
+  const iw = W-padR, plotH = H-padT-padB;
+  const maxImg = Math.max(...days.map(d => d.images)) || 1;
+  const maxCpi = (Math.max(...days.map(d => d.cpi))*1.15) || 1;
+  const step = iw/days.length, bw = Math.max(1, step-2);
+  const cx = i => i*step + step/2, cy = v => padT + plotH - v/maxCpi*plotH;
+
+  let s = days.map((d,i) => {
+    const h = d.images/maxImg*plotH;
+    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-h}" width="${bw}" height="${h}" fill="var(--rule)"/>`;
+  }).join("");
+  s += `<polyline points="${days.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round"/>`;
+  s += days.map((d,i) => `<g><title>${d.date} · ${int(d.images)} images · ${money(d.cpi)} per image</title>`
+    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="8" fill="transparent"/>`
+    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.2" fill="${costColor(d.cpi/(T.blended||1))}"/></g>`).join("");
+  s += `<text x="${W}" y="${padT+8}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi)}</text>`
+     + `<text x="0" y="${H-6}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${days[0].date}</text>`
+     + `<text x="${iw}" y="${H-6}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${days[days.length-1].date}</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  svg.innerHTML = s;
+}
+
+const COLS = {
+  people: [["name","Person"],["match_type","Match"],["months","Mo"],["days","Days"],
+    ["images","Images"],["hours","Hours"],["iph","Img/hr"],["cost","Allocated cost"],["cpi","Cost/image"]],
+  accounts:[["label","Enterprise"],["rooftops","Rooftops"],["people","QC people"],
+    ["images","Images"],["vins","VINs"],["cost","Allocated cost"],["accuracy","Accuracy"],["cpi","Cost/image"]],
+  teams:   [["label","Rooftop"],["sub","Enterprise"],["segment","Segment"],["dealer_type","Type"],
+    ["images","Images"],["vins","VINs"],["cost","Allocated cost"],["accuracy","Accuracy"],["cpi","Cost/image"]]
+};
+
+function renderTable(pms, teams, T){
+  const v = S.view;
+  let data;
+  if (v === "people")   data = mFilter() ? pms.map(p => ({...p, months:1})) : byPerson(pms);
+  if (v === "accounts") data = rollTeams(teams, r => r.enterprise, r => ({label:r.enterprise}));
+  if (v === "teams")    data = rollTeams(teams, r => r.team_id,
+    r => ({label:r.team_name, sub:r.enterprise, segment:r.segment, dealer_type:r.dealer_type}));
+
+  const cols = COLS[v];
+  if (!cols.some(c => c[0] === S.sortKey)) S.sortKey = "cpi";
+  data.sort((a,b) => {
+    const av = a[S.sortKey], bv = b[S.sortKey];
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * S.sortDir;
+  });
+  document.getElementById("row-n").textContent =
+    `${int(data.length)} ${v === "people" ? "people" : v === "accounts" ? "enterprises" : "rooftops"}`;
+
+  document.querySelector("#tbl thead").innerHTML = "<tr>" + cols.map(([k,l]) =>
+    `<th data-k="${k}" class="${k===S.sortKey?"sorted":""}">${l}</th>`).join("") + "</tr>";
+
+  document.querySelector("#tbl tbody").innerHTML = data.map(r => {
+    const c = r.cpi == null ? "var(--steel-light)" : costColor(r.cpi/(T.blended||1));
+    const cpi = r.cpi == null ? `<span style="color:var(--steel-light)">unpriced</span>`
+      : `<span class="cpi-cell"><span class="chip" style="background:${c}"></span>${money(r.cpi)}</span>`;
+    const acc = r.accuracy == null ? `<span style="color:var(--steel-light)">no data</span>`
+      : `<span class="bar" style="width:${Math.round(r.accuracy/2.2)}px"></span>${pct(r.accuracy)}`;
+    if (v === "people"){
+      const tag = r.match_type === "email" ? "matched" : "no salary row";
+      return `<tr>
+        <td><div class="who"><span>${esc(r.name)}${r.emp_no?` <span class="tag">${esc(r.emp_no)}</span>`:""}</span>
+        <span class="m num">${esc(r.email)}</span></div></td>
+        <td style="text-align:left"><span class="tag">${tag}</span></td>
+        <td class="num">${r.months}</td><td class="num">${r.days}</td>
+        <td class="num">${int(r.images)}</td><td class="num">${int(r.hours)}</td>
+        <td class="num">${dec(r.iph)}</td>
+        <td class="num">${r.cost ? money(r.cost) : "—"}</td><td class="num">${cpi}</td></tr>`;
+    }
+    if (v === "accounts"){
+      return `<tr>
+        <td>${esc(r.label)}</td>
+        <td class="num">${int(r.rooftops)}</td><td class="num">${int(r.people)}</td>
+        <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
+        <td class="num">${r.cost?money(r.cost):"—"}</td>
+        <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
+    }
+    return `<tr>
+      <td><div class="who"><span>${esc(r.label)}</span><span class="m num">${esc(r.key)}</span></div></td>
+      <td style="text-align:left;color:var(--steel)">${esc(r.sub||"—")}</td>
+      <td style="text-align:left">${r.segment?`<span class="tag">${esc(r.segment)}</span>`:"—"}</td>
+      <td style="text-align:left;color:var(--steel)">${esc(r.dealer_type||"—")}</td>
+      <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
+      <td class="num">${r.cost?money(r.cost):"—"}</td>
+      <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
+  }).join("");
+
+  document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    S.sortDir = S.sortKey === k ? -S.sortDir : -1;
+    S.sortKey = k; render();
+  }));
+}
+
+/* ==========================================================================
+   7. WIRING
+   ========================================================================== */
+function afterLoad(source){
+  const months = [...new Set([...S.daily.map(r=>r.month_key), ...S.teams.map(r=>r.month_key)])]
+    .filter(Boolean).sort().reverse();
+  document.getElementById("f-month").innerHTML =
+    `<option value="">All months</option>` + months.map(m => `<option>${m}</option>`).join("");
+  const segs = [...new Set(S.teams.map(r => r.segment))].filter(Boolean).sort();
+  document.getElementById("f-seg").innerHTML =
+    `<option value="">All segments</option>` + segs.map(s => `<option>${esc(s)}</option>`).join("");
+
+  const pms = byPersonMonth(S.daily);
+  const unpriced = pms.filter(p => p.cpi == null);
+  if (unpriced.length){
+    const lost = unpriced.reduce((a,p) => a + p.images, 0);
+    const share = lost / Math.max(1, pms.reduce((a,p) => a + p.images, 0)) * 100;
+    const who = [...new Set(unpriced.map(p => p.email))];
+    banner(`<b>${who.length} QC email${who.length>1?"s":""} had no salary row for the months they worked.</b>
+      ${int(lost)} images (${dec(share)}% of output) counted with zero cost, so the blended rate is understated.
+      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+  }
+
+  // ai_accuracy coverage — a team-month with no accuracy row silently leaves the scatter
+  const noAcc = S.teams.filter(t => t.true_accuracy == null);
+  if (noAcc.length){
+    const lost = noAcc.reduce((a,t) => a + t.images, 0);
+    const all  = S.teams.reduce((a,t) => a + t.images, 0);
+    const roofs = [...new Set(noAcc.map(t => t.team_name))];
+    banner(`<b>${noAcc.length} team-months have delivery data but no ai_accuracy row.</b>
+      ${int(lost)} images (${dec(lost/Math.max(1,all)*100)}% of rooftop output) sit outside every
+      accuracy figure and don't appear in the scatter. Their cost still counts.
+      <ul><li>${roofs.slice(0,6).map(esc).join("</li><li>")}${roofs.length>6?`</li><li>and ${roofs.length-6} more rooftops`:""}</li></ul>`);
+  }
+
+  const exc = S.excluded;
+  if (exc.length){
+    const who = [...new Set(exc.map(e => e.email))];
+    const imgs = exc.reduce((a,e) => a + e.images, 0);
+    const inScope = pms.reduce((a,p) => a + p.images, 0);
+    banner(`<b>Excluded by the domain filter: ${who.length} email${who.length>1?"s":""}, ${int(imgs)} images.</b>
+      ${dec(imgs/Math.max(1,imgs+inScope)*100)}% of all QC output, outside every number here.
+      Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
+      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+  }
+
+  document.querySelector(".hero-panel").classList.add("rise");
+  render();
+  console.log("Loaded from", source, "—", S.daily.length, "daily,", S.teams.length, "team-months");
+}
+
+document.getElementById("sql-a").value = SQL_A;
+document.getElementById("sql-b").value = SQL_B;
+document.getElementById("sql-c").value = SQL_C;
+document.getElementById("btn-run").addEventListener("click", runQuery);
+["f-month","f-seg"].forEach(id => document.getElementById(id).addEventListener("change", render));
+document.getElementById("f-search").addEventListener("input", render);
+
+document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click", () => {
+  document.querySelectorAll("#seg button").forEach(x => x.classList.remove("on"));
+  b.classList.add("on");
+  S.view = b.dataset.v; S.sortKey = "cpi"; S.sortDir = -1;
+  render();
 }));
 
-/* ==================================================================
-   Auth + load
-   ================================================================== */
-function setFreshness(t){
-  document.getElementById('freshness').textContent =
-    'Updated ' + new Date(t).toLocaleString('en-IN',{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit'});
-}
-function setUser(u){
-  const slot = document.getElementById('userSlot');
-  if(!u){ slot.innerHTML=''; return; }
-  slot.innerHTML =
-    `<span class="who">${u.picture?`<img src="${esc(u.picture)}" alt="" referrerpolicy="no-referrer">`:''}`
-    + `<b>${esc(u.name||u.email)}</b></span>`
-    + `<button class="ghost" id="signOut">Sign out</button>`;
-  document.getElementById('signOut').addEventListener('click', signOut);
-}
-
-/* ---------- session ------------------------------------------------
-   Mirrors the pattern in the review tool: remember who signed in so the
-   badge survives a reload. Storage can be blocked (private windows,
-   embedded frames), so it falls back to memory rather than throwing.
-   The remembered email is a convenience only — the ID token is fetched
-   fresh on every load and re-checked by the relay.
--------------------------------------------------------------------- */
-const AUTH_SESSION_KEY = 'spyne_qc_cost_user_v1';
-let memSession = null;
-function readSession(){
-  try { const v = localStorage.getItem(AUTH_SESSION_KEY); return v ? JSON.parse(v) : memSession; }
-  catch(e){ return memSession; }
-}
-function writeSession(u){
-  memSession = u;
-  try { localStorage.setItem(AUTH_SESSION_KEY, JSON.stringify(u)); } catch(e){}
-}
-function dropSession(){
-  memSession = null;
-  try { localStorage.removeItem(AUTH_SESSION_KEY); } catch(e){}
-}
-
-const ALLOW = new Set((CONFIG.AUTH_ALLOWED_EMAILS||[]).map(s=>String(s).trim().toLowerCase()));
-
-function decodeJwt(t){
-  const p = t.split('.')[1].replace(/-/g,'+').replace(/_/g,'/');
-  return JSON.parse(decodeURIComponent(escape(atob(p))));
-}
-
-function gateError(msg){
-  const err = document.getElementById('gateErr');
-  err.textContent = msg;
-  err.classList.add('on');
-  document.getElementById('gate').classList.add('on');
-  document.getElementById('gateBusy').classList.remove('on');
-}
-
-function signOut(){
-  dropSession();
-  try { google.accounts.id.disableAutoSelect(); } catch(e){}
-  location.reload();
-}
-
-/* ---------- data ---------- */
-async function loadLive(token){
-  document.getElementById('gateBusy').classList.add('on');
-  const res = await fetch(CONFIG.RELAY_URL, {
-    method:'POST',
-    headers:{'Content-Type':'text/plain;charset=utf-8'},   // simple request, no CORS preflight
-    body: JSON.stringify({token, datasets:'fact,heat,gaps'})
-  });
-  if(!res.ok) throw new Error('The relay did not respond (HTTP '+res.status+'). Check RELAY_URL.');
-  const j = await res.json();
-  if(!j.ok) throw new Error(j.message || 'Could not load data.');
-
-  DATA = {fact:j.data.fact||[], heat:j.data.heat||[], gaps:j.data.gaps||[]};
-  canSeeCost = j.canSeeCost;
-  if(!canSeeCost) document.body.classList.add('nocost');
-
-  setUser(j.user);
-  setFreshness(j.generatedAt);
-  document.getElementById('gate').classList.remove('on');
-  document.getElementById('gateBusy').classList.remove('on');
-  render();
-}
-
-/* ---------- sign-in ---------- */
-function onCredential(resp){
-  document.getElementById('gateErr').classList.remove('on');
-
-  let payload;
-  try { payload = decodeJwt(resp.credential); }
-  catch(e){ return gateError('Sign-in failed. Try again.'); }
-
-  const email = String(payload.email||'').trim().toLowerCase();
-
-  // First check, in the browser: keeps the wrong person out of the UI.
-  // The relay repeats it before touching BigQuery.
-  if(ALLOW.size && !ALLOW.has(email)){
-    dropSession();
-    try { google.accounts.id.disableAutoSelect(); } catch(e){}
-    return gateError(email + ' is not on the access list. Ask Praveen to add you.');
+document.getElementById("btn-csv").addEventListener("click", () => {
+  const pms = byPersonMonth(dailyView()), teams = teamView();
+  let rows;
+  if (S.view === "people"){
+    rows = [["email","name","employee_number","match","months","days","images","hours","images_per_hour","allocated_cost","cost_per_image"],
+      ...(mFilter() ? pms.map(p=>({...p,months:1})) : byPerson(pms)).map(p =>
+        [p.email,p.name,p.emp_no,p.match_type,p.months,p.days,p.images,p.hours.toFixed(0),
+         p.iph.toFixed(2),p.cost.toFixed(2),p.cpi==null?"":p.cpi.toFixed(4)])];
+  }else{
+    rows = [["month","team_id","rooftop","enterprise","segment","dealer_type","qc_people","images","unpriced_images","vins","accuracy_images","true_accuracy","allocated_cost","cost_per_image"],
+      ...teams.map(t => [t.month_key,t.team_id,t.team_name,t.enterprise,t.segment,t.dealer_type,
+        t.people,t.images,t.unpriced_images,t.vins??"",t.acc_images??"",t.true_accuracy??"",
+        t.allocated_cost.toFixed(2),
+        (t.images-t.unpriced_images) ? (t.allocated_cost/(t.images-t.unpriced_images)).toFixed(4) : ""])];
   }
+  const csv = rows.map(r => r.map(v =>
+    /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+  a.download = `qc_cost_${S.view}.csv`; a.click();
+});
 
-  writeSession({email, name:payload.name, picture:payload.picture});
-  loadLive(resp.credential).catch(e=>gateError(e.message));
-}
+let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
 
-function boot(){
-  if(CONFIG.MODE !== 'live'){
-    DATA = buildSample();
-    setFreshness(Date.now());
-    render();
-    return;
-  }
-  document.getElementById('demoBanner').style.display='none';
-
-  const missing = [];
-  if(!CONFIG.RELAY_URL)        missing.push('RELAY_URL');
-  if(!CONFIG.GOOGLE_CLIENT_ID) missing.push('GOOGLE_CLIENT_ID');
-  if(missing.length) return gateError('Add '+missing.join(' and ')+' to config.js, then reload.');
-
-  const known = readSession();
-  if(known) setUser(known);          // show the badge straight away
-  document.getElementById('gate').classList.add('on');
-
-  const s = document.createElement('script');
-  s.src = 'https://accounts.google.com/gsi/client';
-  s.async = true; s.defer = true;
-  s.onload = () => {
-    google.accounts.id.initialize({
-      client_id: CONFIG.GOOGLE_CLIENT_ID,
-      callback:  onCredential,
-      auto_select: true,           // returning users sign in silently
-      cancel_on_tap_outside: false
-    });
-    google.accounts.id.renderButton(document.getElementById('gsiBtn'),
-      {theme:'outline', size:'large', text:'signin_with', shape:'rectangular', width:300});
-    google.accounts.id.prompt();
-  };
-  s.onerror = () => gateError('Google sign-in did not load. Check your connection and reload.');
-  document.head.append(s);
-}
-boot();
+(async () => {
+  if (await loadJson()) return;
+  const s = sample();
+  S.daily = s.daily.map(normDaily);
+  S.teams = s.teams.map(normTeam);
+  S.excluded = s.excluded.map(normExcl);
+  banner(`<b>Showing sample data.</b> Nothing is connected yet — press <b>Run query</b> to sign in
+    and pull from BigQuery, or commit a <b>${CONFIG.jsonFallback}</b> next to this file.`);
+  afterLoad("sample data");
+})();
 </script>
 </body>
 </html>
