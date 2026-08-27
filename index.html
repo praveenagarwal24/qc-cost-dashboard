@@ -398,6 +398,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <textarea id="sql-b" spellcheck="false"></textarea>
       <div class="eyebrow">C · work excluded by the domain filter</div>
       <textarea id="sql-c" spellcheck="false" style="min-height:140px"></textarea>
+      <div class="eyebrow">D · product × team × month — what was delivered</div>
+      <textarea id="sql-d" spellcheck="false"></textarea>
     </div>
   </details>
 
@@ -441,7 +443,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v8 · 27 Aug 2026";
+const VERSION = "v9 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -644,6 +646,24 @@ LEFT JOIN arr r            -- no month column: a snapshot, joined on team alone
 ORDER BY t.images DESC
 LIMIT 20000`;
 
+/* What was actually delivered, at product x team x month. */
+const SQL_D = SHARED + `
+SELECT
+  w.month_key,
+  IFNULL(NULLIF(TRIM(w.Product), ''), 'Unspecified') AS product,
+  w.team_id,
+  ANY_VALUE(w.Team_Name)      AS team_name,
+  ANY_VALUE(w.Enterprise)     AS enterprise,
+  SUM(w.images)               AS images,
+  SUM(w.sku_count)            AS sku_count,
+  SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
+  ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost
+FROM work w
+JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
+GROUP BY w.month_key, product, w.team_id
+ORDER BY images DESC
+LIMIT 40000`;
+
 const SQL_C = `
 SELECT
   FORMAT_DATE('%Y-%m', DATE(Hourly_Date))     AS month_key,
@@ -830,9 +850,11 @@ async function runQuery(){
   const btn = el("btn-run");
   btn.disabled = true; btn.textContent = "Loading…"; clearAlerts(); startLoader();
   try{
-    const [a,b,c] = await Promise.all([
-      bq(el("sql-a").value), bq(el("sql-b").value), bq(el("sql-c").value)]);
-    S.daily = a.map(normDaily); S.teams = b.map(normTeam); S.excluded = c.map(normExcl);
+    const [a,b,c,d] = await Promise.all([
+      bq(el("sql-a").value), bq(el("sql-b").value),
+      bq(el("sql-c").value), bq(el("sql-d").value)]);
+    S.daily = a.map(normDaily); S.teams = b.map(normTeam);
+    S.excluded = c.map(normExcl); S.products = d.map(normProd);
     afterLoad("BigQuery");
   }catch(e){
     if (e.expired) return signOut("Your session expired. Please sign in again.");
@@ -873,6 +895,14 @@ const normTeam = o => ({
   // one month of contracted ARR, converted so it can sit beside INR salary cost
   arr_month: num(o.contracted_arr) ? num(o.contracted_arr) * CONFIG.arrToInr / 12 : null
 });
+const normProd = o => ({
+  month_key:o.month_key||"", product:o.product||"Unspecified",
+  team_id:(o.team_id||"").toLowerCase(),
+  team_name:o.team_name||"—", enterprise:o.enterprise||"—",
+  images:num(o.images)||0, sku_count:num(o.sku_count)||0,
+  unpriced_images:num(o.unpriced_images)||0,
+  allocated_cost:num(o.allocated_cost)||0
+});
 const normExcl = o => ({
   month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
   images:num(o.images)||0, hours:num(o.hours)||0
@@ -887,6 +917,7 @@ async function loadJson(){
     S.daily = j.daily.map(normDaily);
     S.teams = (j.teams||[]).map(normTeam);
     S.excluded = (j.excluded||[]).map(normExcl);
+    S.products = (j.products||[]).map(normProd);
     afterLoad(CONFIG.jsonFallback);
     return true;
   }catch(e){ return false; }
@@ -977,10 +1008,21 @@ function sample(){
       true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
     });
   }));
+  const products = [];
+  ["Images","Video","360"].forEach((p,pi) => teams.forEach(t => {
+    if ((pi + t.team_id.length) % 3 === 0 && pi) return;   // not every rooftop sells all three
+    const share = pi === 0 ? .72 : pi === 1 ? .18 : .10;
+    products.push({month_key:t.month_key, product:p, team_id:t.team_id,
+      team_name:t.team_name, enterprise:t.enterprise,
+      images: Math.round(t.images*share), sku_count: Math.round(t.images*share/11),
+      unpriced_images: Math.round(t.unpriced_images*share),
+      allocated_cost: +(t.allocated_cost*share).toFixed(2)});
+  }));
+
   const excluded = [];
   ["raj.tripathi@spyne.ai","kishor@spyne.ai","abhinav.sinha@spyne.ai"].forEach((e,i) =>
     months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
-  return {daily, teams, excluded};
+  return {daily, teams, excluded, products};
 }
 
 /* ==========================================================================
@@ -1278,8 +1320,8 @@ function renderKpis(T, scoped, teams){
        <div class="kpis">${cards(vol)}</div></div>
      <div class="kpi-group"><div class="kpi-label">By customer segment</div>
        ${segmentTable(teams, T)}</div>
-     <div class="kpi-group"><div class="kpi-label">By product</div>
-       ${productTable(teams, T)}</div>`;
+     <div class="kpi-group"><div class="kpi-label">By product delivered</div>
+       ${productTable()}</div>`;
 }
 
 /* Customer_Segment comes from ai_accuracy, so a rooftop with no accuracy row has
@@ -1346,68 +1388,76 @@ const DASH = `<span style="color:var(--steel-light)">—</span>`;
 const accCell = a => a == null ? DASH
   : `<span class="accbar" style="width:${Math.round(a/2.4)}px"></span>${pct(a)}`;
 
-/* Product names as they appear in arr.Products, mapped to readable labels.
-   Anything not listed still shows, under its raw name. */
+/* Product comes from delivery_working_data, so this is what was actually
+   delivered rather than what the account is contracted for in arr. Each hourly
+   row carries one Product, so these rows sum to the total instead of overlapping. */
 const PRODUCT_LABELS = {
   image:"Images", images:"Images", video:"Video",
-  threesixty:"360", "360":"360", inventory:"Inventory",
-  website:"Website", advancetools:"Advance Tools"
+  threesixty:"360", "360":"360", "3sixty":"360"
 };
 const PRODUCT_ORDER = ["Images", "Video", "360"];
-const prodLabel = p => PRODUCT_LABELS[p.toLowerCase()] || p;
+const prodLabel = p => PRODUCT_LABELS[String(p).toLowerCase()] || p;
 const prodRank = l => {
   const i = PRODUCT_ORDER.indexOf(l);
-  return i >= 0 ? i : (l === "No product data" ? 99 : 50);
+  return i >= 0 ? i : (l === "Unspecified" ? 99 : 50);
 };
 
-/* A rooftop can carry several products at once, so these rows deliberately
-   overlap and will not sum to the total — the same images appear under every
-   product that rooftop sells. Read each row against the All row, not each other. */
-function productTable(teams, T){
-  const m = new Map(), all = blankAgg("All rooftops");
-  let tagged = 0;
-  for (const t of teams){
-    addAgg(all, t);
-    const list = (t.products || "").split(", ").map(s => s.trim()).filter(Boolean);
-    if (!list.length){
-      if (!m.has("No product data")) m.set("No product data", blankAgg("No product data"));
-      addAgg(m.get("No product data"), t);
-      continue;
-    }
-    tagged++;
-    for (const p of new Set(list.map(prodLabel))){
-      if (!m.has(p)) m.set(p, blankAgg(p));
-      addAgg(m.get(p), t);
-    }
-  }
-  const rows = [...m.values()].map(deriveAgg)
-    .sort((a,b) => prodRank(a.key) - prodRank(b.key) || b.images - a.images);
-  if (!rows.length)
-    return `<div class="segwrap"><span class="status">No product data in arr</span></div>`;
-
-  const pctTagged = teams.length ? tagged/teams.length*100 : 0;
-  const line = r => `<tr class="prodrow" data-prod="${esc(r.key)}">
-      <td><span class="tag">${esc(r.key)}</span></td>
-      <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
-      <td>${r.vins ? int(r.vins) : DASH}</td>
-      <td>${int(r.images)}</td>
-      <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
-      <td>${r.costToServe == null ? DASH : dec(r.costToServe,1) + "%"}</td>
-      <td>${accCell(r.acc)}</td></tr>`;
-  const allR = deriveAgg(all);
-  return `<div class="segwrap"><table class="segtab">
-    <thead><tr><th>Product</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
-      <th>Images</th><th>Cost / image</th><th>Cost to serve</th><th>True accuracy</th></tr></thead>
-    <tbody>${rows.map(line).join("")}
-      <tr><td>All rooftops</td><td>${int(allR.ents)}</td><td>${int(allR.roofs)}</td>
-        <td>${allR.vins ? int(allR.vins) : DASH}</td><td>${int(allR.images)}</td>
-        <td>${allR.cpi == null ? DASH : money(allR.cpi)}</td>
-        <td>${allR.costToServe == null ? DASH : dec(allR.costToServe,1) + "%"}</td>
-        <td>${accCell(allR.acc)}</td></tr></tbody>
-  </table>
-  <div class="seghint">Rooftops sell more than one product, so rows overlap and won't sum ·
-    ${dec(pctTagged,0)}% of team-months have product data · click a product for its rooftops</div></div>`;
+/* Same month and account scope as everything else: whichever rooftops survive
+   teamView(), so a product row never reports work the filters excluded. */
+function productView(){
+  const f = F();
+  const ids = new Set(teamView().map(t => t.team_id));
+  return S.products.filter(p =>
+    (!f.month || p.month_key === f.month) && ids.has(p.team_id));
 }
+
+const prodBlank = key => ({key, ents:new Set(), roofs:new Set(),
+  images:0, priced:0, cost:0, skus:0});
+function prodPush(x, r){
+  x.ents.add(r.enterprise); x.roofs.add(r.team_id);
+  x.images += r.images; x.priced += r.images - r.unpriced_images;
+  x.cost += r.allocated_cost; x.skus += r.sku_count;
+}
+const prodDone = x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
+  cpi: x.priced ? x.cost/x.priced : null,
+  imagesPerSku: x.skus ? x.images/x.skus : null });
+
+function productTable(){
+  const rows = productView();
+  if (!rows.length)
+    return `<div class="segwrap"><span class="status">No product data</span></div>`;
+
+  const m = new Map(), all = prodBlank("All products");
+  for (const r of rows){
+    const k = prodLabel(r.product);
+    if (!m.has(k)) m.set(k, prodBlank(k));
+    prodPush(m.get(k), r); prodPush(all, r);
+  }
+  const out = [...m.values()].map(prodDone)
+    .sort((a,b) => prodRank(a.key) - prodRank(b.key) || b.images - a.images);
+  const allR = prodDone(all);
+
+  const line = (r, isTotal) => `<tr${isTotal ? "" : ` class="prodrow" data-prod="${esc(r.key)}"`}>
+      <td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
+      <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
+      <td>${r.skus ? int(r.skus) : DASH}</td>
+      <td>${int(r.images)}</td>
+      <td>${r.imagesPerSku == null ? DASH : dec(r.imagesPerSku,1)}</td>
+      <td>${money(r.cost)}</td>
+      <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
+      <td>${allR.images ? dec(r.images/allR.images*100,1) + "%" : DASH}</td></tr>`;
+
+  return `<div class="segwrap"><table class="segtab">
+    <thead><tr><th>Product</th><th>Enterprises</th><th>Rooftops</th><th>SKUs</th>
+      <th>Images</th><th>Images / SKU</th><th>Delivery cost</th><th>Cost / image</th>
+      <th>Share of images</th></tr></thead>
+    <tbody>${out.map(r => line(r, false)).join("")}
+      ${line(allR, true)}</tbody>
+  </table>
+  <div class="seghint">From delivery_working_data — what was actually delivered, so rows sum to
+    the total · accuracy and VINs aren't reported per product · click a product for its rooftops</div></div>`;
+}
+
 
 function segmentTable(teams, T){
   const pinned = pinSegments(teams);
@@ -1466,17 +1516,15 @@ const DRILL = {
     build: segmentDrill
   },
   product: {
-    eyebrow: "Product",
+    eyebrow: "Product delivered",
     cols: [
       ["enterprise",  "Enterprise",    "text"],
       ["rooftop",     "Rooftop",       "text"],
-      ["vins",        "VINs",          "int"],
+      ["skus",        "SKUs",          "int"],
       ["images",      "Images",        "int"],
-      ["imagesPerVin","Images / VIN",  "dec"],
+      ["imagesPerSku","Images / SKU",  "dec"],
       ["cost",        "Delivery cost", "money"],
-      ["cpi",         "Cost / image",  "money"],
-      ["costToServe", "Cost to serve", "pct"],
-      ["acc",         "True accuracy", "acc"]
+      ["cpi",         "Cost / image",  "money"]
     ],
     find: "Find rooftop\u2026",
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
@@ -1542,21 +1590,17 @@ function dayDrill(date){
 }
 
 function productDrill(key){
-  const teams = teamView().filter(t => {
-    const list = (t.products || "").split(", ").map(s => s.trim()).filter(Boolean);
-    return key === "No product data"
-      ? !list.length
-      : list.map(prodLabel).includes(key);
-  });
-  const m = new Map(), all = blankAgg("All rooftops");
-  for (const t of teams){
-    let x = m.get(t.team_id);
-    if (!x) m.set(t.team_id, x = Object.assign(blankAgg(t.team_id),
-      {enterprise:t.enterprise, rooftop:t.team_name}));
-    addAgg(x, t); addAgg(all, t);
+  const rows = productView().filter(r => prodLabel(r.product) === key);
+  const m = new Map(), all = prodBlank("All rooftops");
+  for (const r of rows){
+    let x = m.get(r.team_id);
+    if (!x) m.set(r.team_id, x = Object.assign(prodBlank(r.team_id),
+      {enterprise:r.enterprise, rooftop:r.team_name}));
+    prodPush(x, r); prodPush(all, r);
   }
-  return { rows:[...m.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
+  return { rows:[...m.values()].map(prodDone), total:prodDone(all), unit:"rooftops" };
 }
+
 
 function fmtDrill(r, key, kind){
   const v = r[key];
@@ -1878,6 +1922,7 @@ el("btn-theme").addEventListener("click", () => {
   applyTheme(theme);
 });
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
+el("sql-d").value = SQL_D;
 el("btn-run").addEventListener("click", runQuery);
 ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
   .forEach(id => el(id).addEventListener("change", render));
