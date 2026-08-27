@@ -11,9 +11,20 @@
 :root{
   --ink:#10151c; --steel:#5b6878; --steel-light:#8b97a5;
   --paper:#eef1f5; --card:#fff; --rule:#dbe1e9; --rule-soft:#eaeef3;
+  --hover:#f6f9fb; --field:#fff; --tagbg:#eaeef3;
   --cost-low:#0e7c66; --cost-mid:#5b6878; --cost-high:#9e1b32;
+  --shadow:0 12px 40px rgba(16,21,28,.16);
   --pad:20px; --radius:3px;
 }
+[data-theme="dark"]{
+  --ink:#e8edf3; --steel:#94a3b5; --steel-light:#66788c;
+  --paper:#0b1017; --card:#131a23; --rule:#242f3c; --rule-soft:#1c2531;
+  --hover:#1a222d; --field:#0f161e; --tagbg:#1e2836;
+  --cost-low:#25a98c; --cost-mid:#94a3b5; --cost-high:#e05a70;
+  --shadow:0 12px 40px rgba(0,0,0,.5);
+}
+html{color-scheme:light}
+html[data-theme="dark"]{color-scheme:dark}
 *{box-sizing:border-box}
 html,body{margin:0;padding:0}
 body{background:var(--paper);color:var(--ink);
@@ -27,9 +38,16 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 
 .topbar{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;margin-bottom:12px}
 .topbar h1{font-size:26px;letter-spacing:-.01em;line-height:1.1}
+.brand{display:flex;gap:13px;align-items:flex-start}
+.mark{width:34px;height:34px;border-radius:7px;background:var(--tagbg);flex:none;
+  display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:8px;margin-top:3px}
+.mark i{display:block;border-radius:1px;background:var(--steel-light)}
+.mark i:nth-child(1){background:var(--cost-low)}
+.mark i:nth-child(4){background:var(--cost-high)}
+.mark img{width:100%;height:100%;object-fit:contain;grid-column:1/3;grid-row:1/3}
 .topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
 .ver{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light);
-  background:var(--rule-soft);padding:1px 6px;border-radius:2px}
+  background:var(--tagbg);padding:1px 6px;border-radius:2px}
 .actions{display:flex;gap:8px;align-items:center}
 
 .filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;
@@ -38,10 +56,10 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .filterbar .lab{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--steel-light);margin-right:2px}
 .filterbar .div{width:1px;height:20px;background:var(--rule);margin:0 5px}
-select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--card);
+select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--field);
   border:1px solid var(--rule);border-radius:var(--radius);padding:6px 8px;max-width:210px}
 select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:1px}
-select.on,input.on{border-color:var(--ink);background:#f4f7fa}
+select.on,input.on{border-color:var(--ink);background:var(--hover)}
 button{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:12px;
   letter-spacing:.06em;text-transform:uppercase;background:var(--ink);color:#fff;
   border:1px solid var(--ink);border-radius:var(--radius);padding:8px 14px;cursor:pointer}
@@ -106,7 +124,7 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 
 .chart{width:100%;display:block;overflow:visible}
 .trendhit{cursor:pointer}
-.trendhit:hover rect{fill:rgba(16,21,28,.05)}
+.trendhit:hover rect{fill:rgba(127,145,165,.10)}
 .trendhit.nolink{cursor:default}
 .trendhit.nolink:hover rect{fill:transparent}
 
@@ -125,17 +143,17 @@ th{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10
 th:first-child,td:first-child{text-align:left}
 th.sorted{color:var(--ink)}
 td{padding:9px 12px;border-bottom:1px solid var(--rule-soft);text-align:right;white-space:nowrap}
-tbody tr:hover td{background:#f7f9fb}
+tbody tr:hover td{background:var(--hover)}
 .who{display:flex;flex-direction:column;gap:1px}
 .who .m{font-size:11px;color:var(--steel-light)}
 .cpi-cell{display:inline-flex;align-items:center;gap:8px;justify-content:flex-end}
 .chip{width:8px;height:8px;border-radius:1px;flex:none}
 .tag{font-family:"IBM Plex Mono",monospace;font-size:10px;padding:1px 5px;border-radius:2px;
-  background:var(--rule-soft);color:var(--steel)}
-.tag-warn{background:#f7e3e6;color:#9e1b32}
+  background:var(--tagbg);color:var(--steel)}
+.tag-warn{background:rgba(158,27,50,.14);color:var(--cost-high)}
 .bar{display:inline-block;height:5px;border-radius:1px;background:var(--rule);vertical-align:middle;margin-right:7px}
 .scoped{padding:12px var(--pad);color:var(--steel);font-size:13px;
-  border-bottom:1px solid var(--rule-soft);background:#f7f9fb}
+  border-bottom:1px solid var(--rule-soft);background:var(--hover)}
 
 .alert{border:1px solid var(--rule);background:var(--card);color:var(--ink);
   padding:11px var(--pad);border-radius:var(--radius);margin-bottom:14px;font-size:13px}
@@ -166,7 +184,7 @@ details.sql[open] summary{border-radius:var(--radius) var(--radius) 0 0;color:va
   background:var(--card);padding:0 var(--pad) var(--pad)}
 .sqlbox .eyebrow{padding:12px 0 6px}
 textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-size:12px;
-  line-height:1.6;color:var(--ink);background:#fbfcfd;border:1px solid var(--rule);
+  line-height:1.6;color:var(--ink);background:var(--field);border:1px solid var(--rule);
   border-radius:var(--radius);padding:12px;resize:vertical;max-width:none}
 
 .rise{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
@@ -176,15 +194,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ---------- drill-down ---------- */
 .seghint{padding:9px var(--pad) 2px;font-size:11px;color:var(--steel-light);
   font-family:"IBM Plex Mono",monospace}
-.segrow{cursor:pointer}
-.segrow:hover td{background:#f4f7fa}
-.segrow td:first-child::after{content:"›";color:var(--steel-light);margin-left:7px}
+.segrow,.prodrow{cursor:pointer}
+.segrow:hover td,.prodrow:hover td{background:var(--hover)}
+.segrow td:first-child::after,.prodrow td:first-child::after{content:"›";color:var(--steel-light);margin-left:7px}
 
-.modal{position:fixed;inset:0;z-index:95;background:rgba(16,21,28,.5);
+.modal{position:fixed;inset:0;z-index:95;background:rgba(4,8,13,.62);
   display:none;align-items:center;justify-content:center;padding:24px}
 .modal.show{display:flex}
 .modal-card{background:var(--card);border-radius:var(--radius);width:100%;
-  max-width:1200px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+  max-width:1200px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden;box-shadow:var(--shadow)}
 .modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
   padding:16px var(--pad);border-bottom:1px solid var(--rule);flex:none}
 .modal-head h2{font-size:19px;margin:2px 0 3px}
@@ -208,7 +226,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 .drilltab th:nth-child(2),.drilltab td:nth-child(2){text-align:left}
 .drilltab td:first-child,.drilltab td:nth-child(2){font-family:"IBM Plex Sans",sans-serif}
 .drilltab th:last-child,.drilltab td:last-child{padding-right:var(--pad)}
-.drilltab tbody tr:hover td{background:#f7f9fb}
+.drilltab tbody tr:hover td{background:var(--hover)}
 .drilltab tfoot td{position:sticky;bottom:0;z-index:2;background:var(--card);
   border-top:1px solid var(--rule);border-bottom:none;font-weight:500}
 .drilltab tfoot td:first-child{font-family:"IBM Plex Sans",sans-serif;color:var(--steel)}
@@ -328,15 +346,19 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 <div class="wrap">
 
   <div class="topbar">
-    <div>
-      <div class="eyebrow">Spyne · Delivery Operations</div>
-      <h1>QC Cost, Output &amp; Accuracy</h1>
+    <div class="brand">
+      <div class="mark" id="mark"><i></i><i></i><i></i><i></i></div>
+      <div>
+        <div class="eyebrow">Spyne · Delivery Operations</div>
+        <h1>QC Cost, Output &amp; Accuracy</h1>
       <div class="sub">Salary on email + month · AI accuracy on team + month ·
         <span class="ver" id="ver"></span></div>
+      </div>
     </div>
     <div class="actions">
       <span class="whoami"><span class="em" id="who"></span>
         <button id="btn-out">Sign out</button></span>
+      <button class="ghost tiny" id="btn-theme" title="Switch theme">Dark</button>
       <button class="ghost" id="btn-csv">Export CSV</button>
       <button id="btn-run">Refresh</button>
     </div>
@@ -419,7 +441,11 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v7 · 27 Aug 2026";
+const VERSION = "v8 · 27 Aug 2026";
+
+/* Point this at Spyne's own logo file to replace the placeholder mark.
+   Any https URL the browser can reach will do. */
+const LOGO_URL = "";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -437,6 +463,12 @@ const CONFIG = {
   // 1 if Contracted Arr is already INR — the ratios are meaningless otherwise.
   arrCurrency: "USD",
   arrToInr: 88,
+
+  // Where vehicle counts come from. "accuracy" uses VINs from ai_accuracy, which
+  // only exists for rooftops in that table — that's why No segment shows blanks.
+  // Switch to "sku" to use SKU_Count from delivery_working_data instead, which
+  // covers every rooftop. Only do that if SKU_Count really is one row per vehicle.
+  vinSource: "accuracy",
 
   // Who may open the page. This is a courtesy check only — the real gates are
   // the Google test-user list and BigQuery IAM, both enforced server-side.
@@ -558,8 +590,11 @@ arr AS (
     MAX(\`Contracted Arr\`)           AS contracted_arr,
     MAX(\`Live Arr\`)                 AS live_arr,
     ANY_VALUE(Version)                AS version,
-    ANY_VALUE(ARRAY_TO_STRING(
-      REGEXP_EXTRACT_ALL(Products, r"'([^']+)'"), ', ')) AS products,
+    ANY_VALUE(ARRAY_TO_STRING(ARRAY(
+      SELECT REGEXP_REPLACE(p, r'[^A-Za-z0-9_]', '')
+      FROM UNNEST(SPLIT(IFNULL(Products, ''), ',')) p
+      WHERE REGEXP_REPLACE(p, r'[^A-Za-z0-9_]', '') != ''
+    ), ', ')) AS products,
     COUNT(*)                          AS arr_rows
   FROM \`${CONFIG.project}.${CONFIG.dataset}.arr\`
   WHERE \`Team ID\` IS NOT NULL AND TRIM(\`Team ID\`) != ''
@@ -581,6 +616,7 @@ team AS (
     SUM(w.images)               AS images,
     SUM(IF(pm.cohort = 'inhouse', w.images, 0))   AS images_inhouse,
     SUM(IF(pm.cohort = 'os',      w.images, 0))   AS images_os,
+    SUM(w.sku_count)                              AS sku_count,
     SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
     ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost,
     ROUND(SUM(IF(pm.cohort = 'inhouse', w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_inhouse,
@@ -594,7 +630,7 @@ team AS (
 SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
   t.people, t.people_inhouse, t.people_os, t.reviewers,
-  t.images, t.images_inhouse, t.images_os, t.unpriced_images,
+  t.images, t.images_inhouse, t.images_os, t.unpriced_images, t.sku_count,
   t.allocated_cost, t.cost_inhouse, t.cost_os, t.hours_attributed,
   a.segment, a.poc, a.vins, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
@@ -639,8 +675,13 @@ const pct  = n => n == null ? "—" : dec(n,1) + "%";
 const esc  = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const el   = id => document.getElementById(id);
 
+const RAMP = {
+  light: [[.55,[14,124,102]],  [1,[91,104,120]],   [1.9,[158,27,50]]],
+  dark:  [[.55,[37,169,140]],  [1,[148,163,181]],  [1.9,[224,90,112]]]
+};
 function costColor(ratio){
-  const stops = [[.55,[14,124,102]],[1,[91,104,120]],[1.9,[158,27,50]]];
+  const stops = RAMP[document.documentElement.getAttribute("data-theme") === "dark"
+    ? "dark" : "light"];
   if (!isFinite(ratio) || ratio <= 0) return "#8b97a5";
   const r = Math.max(stops[0][0], Math.min(stops[2][0], ratio));
   const [lo,hi] = r <= 1 ? [stops[0],stops[1]] : [stops[1],stops[2]];
@@ -820,6 +861,7 @@ const normTeam = o => ({
   reviewers: o.reviewers ? o.reviewers.split("|").filter(Boolean) : [],
   images:num(o.images)||0,
   images_inhouse:num(o.images_inhouse)||0, images_os:num(o.images_os)||0,
+  sku_count:num(o.sku_count)||0,
   unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
   cost_inhouse:num(o.cost_inhouse)||0, cost_os:num(o.cost_os)||0,
@@ -1017,7 +1059,7 @@ function rollTeams(rows, keyFn, labelFn){
     if (r.true_accuracy != null && r.acc_images){
       x.accNum += r.true_accuracy * r.acc_images; x.accDen += r.acc_images;
     }
-    if (r.vins) x.vins += r.vins;
+    x.vins += vinsOf(r);
     if (r.stage) x.stages.add(r.stage);
     if (r.arr_month){ x.arrMonth += r.arr_month; x.costWithArr += r.allocated_cost; }
   }
@@ -1038,7 +1080,8 @@ function totals(pms, teams, scoped){
      inflate the figure by whatever share of work has no accuracy row. */
   let vins = 0, costWithVins = 0, arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
-    if (t.vins){ vins += t.vins; costWithVins += t.allocated_cost; }
+    const vc = vinsOf(t);
+    if (vc){ vins += vc; costWithVins += t.allocated_cost; }
     if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
@@ -1099,6 +1142,8 @@ function render(){
   renderTrend(rows, teams, T, scoped);
   document.querySelectorAll(".segrow").forEach(tr =>
     tr.addEventListener("click", () => openDrill("segment", tr.dataset.seg)));
+  document.querySelectorAll(".prodrow").forEach(tr =>
+    tr.addEventListener("click", () => openDrill("product", tr.dataset.prod)));
   if (S.drill) renderDrill();   // keep an open drill in step with the filters
 }
 
@@ -1232,7 +1277,9 @@ function renderKpis(T, scoped, teams){
      <div class="kpi-group"><div class="kpi-label">Volume</div>
        <div class="kpis">${cards(vol)}</div></div>
      <div class="kpi-group"><div class="kpi-label">By customer segment</div>
-       ${segmentTable(teams, T)}</div>`;
+       ${segmentTable(teams, T)}</div>
+     <div class="kpi-group"><div class="kpi-label">By product</div>
+       ${productTable(teams, T)}</div>`;
 }
 
 /* Customer_Segment comes from ai_accuracy, so a rooftop with no accuracy row has
@@ -1261,6 +1308,10 @@ function pinSegments(teams){
 }
 const segOf = (p, t) => p.get(t.team_id) || "No segment";
 
+/* ai_accuracy only covers rooftops it has rows for, which is why "No segment"
+   shows no VINs. SKU_Count comes from delivery data and covers everything. */
+const vinsOf = t => (CONFIG.vinSource === "sku" ? t.sku_count : t.vins) || 0;
+
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
   cost:0, vins:0, costWithVins:0, imagesWithVins:0,
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
@@ -1269,8 +1320,9 @@ function addAgg(x, t){
   x.ents.add(t.enterprise); x.roofs.add(t.team_id);
   x.images += t.images; x.priced += t.images - t.unpriced_images;
   x.cost += t.allocated_cost;
-  if (t.vins){
-    x.vins += t.vins;
+  const vinCount = vinsOf(t);
+  if (vinCount){
+    x.vins += vinCount;
     x.costWithVins += t.allocated_cost;
     x.imagesWithVins += t.images;   // numerator must match the VIN denominator
   }
@@ -1293,6 +1345,69 @@ const deriveAgg = x => ({...x,
 const DASH = `<span style="color:var(--steel-light)">—</span>`;
 const accCell = a => a == null ? DASH
   : `<span class="accbar" style="width:${Math.round(a/2.4)}px"></span>${pct(a)}`;
+
+/* Product names as they appear in arr.Products, mapped to readable labels.
+   Anything not listed still shows, under its raw name. */
+const PRODUCT_LABELS = {
+  image:"Images", images:"Images", video:"Video",
+  threesixty:"360", "360":"360", inventory:"Inventory",
+  website:"Website", advancetools:"Advance Tools"
+};
+const PRODUCT_ORDER = ["Images", "Video", "360"];
+const prodLabel = p => PRODUCT_LABELS[p.toLowerCase()] || p;
+const prodRank = l => {
+  const i = PRODUCT_ORDER.indexOf(l);
+  return i >= 0 ? i : (l === "No product data" ? 99 : 50);
+};
+
+/* A rooftop can carry several products at once, so these rows deliberately
+   overlap and will not sum to the total — the same images appear under every
+   product that rooftop sells. Read each row against the All row, not each other. */
+function productTable(teams, T){
+  const m = new Map(), all = blankAgg("All rooftops");
+  let tagged = 0;
+  for (const t of teams){
+    addAgg(all, t);
+    const list = (t.products || "").split(", ").map(s => s.trim()).filter(Boolean);
+    if (!list.length){
+      if (!m.has("No product data")) m.set("No product data", blankAgg("No product data"));
+      addAgg(m.get("No product data"), t);
+      continue;
+    }
+    tagged++;
+    for (const p of new Set(list.map(prodLabel))){
+      if (!m.has(p)) m.set(p, blankAgg(p));
+      addAgg(m.get(p), t);
+    }
+  }
+  const rows = [...m.values()].map(deriveAgg)
+    .sort((a,b) => prodRank(a.key) - prodRank(b.key) || b.images - a.images);
+  if (!rows.length)
+    return `<div class="segwrap"><span class="status">No product data in arr</span></div>`;
+
+  const pctTagged = teams.length ? tagged/teams.length*100 : 0;
+  const line = r => `<tr class="prodrow" data-prod="${esc(r.key)}">
+      <td><span class="tag">${esc(r.key)}</span></td>
+      <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
+      <td>${r.vins ? int(r.vins) : DASH}</td>
+      <td>${int(r.images)}</td>
+      <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
+      <td>${r.costToServe == null ? DASH : dec(r.costToServe,1) + "%"}</td>
+      <td>${accCell(r.acc)}</td></tr>`;
+  const allR = deriveAgg(all);
+  return `<div class="segwrap"><table class="segtab">
+    <thead><tr><th>Product</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
+      <th>Images</th><th>Cost / image</th><th>Cost to serve</th><th>True accuracy</th></tr></thead>
+    <tbody>${rows.map(line).join("")}
+      <tr><td>All rooftops</td><td>${int(allR.ents)}</td><td>${int(allR.roofs)}</td>
+        <td>${allR.vins ? int(allR.vins) : DASH}</td><td>${int(allR.images)}</td>
+        <td>${allR.cpi == null ? DASH : money(allR.cpi)}</td>
+        <td>${allR.costToServe == null ? DASH : dec(allR.costToServe,1) + "%"}</td>
+        <td>${accCell(allR.acc)}</td></tr></tbody>
+  </table>
+  <div class="seghint">Rooftops sell more than one product, so rows overlap and won't sum ·
+    ${dec(pctTagged,0)}% of team-months have product data · click a product for its rooftops</div></div>`;
+}
 
 function segmentTable(teams, T){
   const pinned = pinSegments(teams);
@@ -1350,6 +1465,24 @@ const DRILL = {
                  || (r.enterprise||"").toLowerCase().includes(q),
     build: segmentDrill
   },
+  product: {
+    eyebrow: "Product",
+    cols: [
+      ["enterprise",  "Enterprise",    "text"],
+      ["rooftop",     "Rooftop",       "text"],
+      ["vins",        "VINs",          "int"],
+      ["images",      "Images",        "int"],
+      ["imagesPerVin","Images / VIN",  "dec"],
+      ["cost",        "Delivery cost", "money"],
+      ["cpi",         "Cost / image",  "money"],
+      ["costToServe", "Cost to serve", "pct"],
+      ["acc",         "True accuracy", "acc"]
+    ],
+    find: "Find rooftop\u2026",
+    match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
+                 || (r.enterprise||"").toLowerCase().includes(q),
+    build: productDrill
+  },
   day: {
     eyebrow: "Day",
     cols: [
@@ -1406,6 +1539,23 @@ function dayDrill(date){
   return { rows:[...m.values()].map(fin),
            total: fin({...t, key:"All people", name:"All people", email:""}),
            unit:"people" };
+}
+
+function productDrill(key){
+  const teams = teamView().filter(t => {
+    const list = (t.products || "").split(", ").map(s => s.trim()).filter(Boolean);
+    return key === "No product data"
+      ? !list.length
+      : list.map(prodLabel).includes(key);
+  });
+  const m = new Map(), all = blankAgg("All rooftops");
+  for (const t of teams){
+    let x = m.get(t.team_id);
+    if (!x) m.set(t.team_id, x = Object.assign(blankAgg(t.team_id),
+      {enterprise:t.enterprise, rooftop:t.team_name}));
+    addAgg(x, t); addAgg(all, t);
+  }
+  return { rows:[...m.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
 }
 
 function fmtDrill(r, key, kind){
@@ -1706,6 +1856,27 @@ function afterLoad(source){
 }
 
 el("ver").textContent = VERSION;
+
+if (LOGO_URL) el("mark").innerHTML =
+  `<img src="${LOGO_URL}" alt="Spyne" onerror="this.remove()">`;
+
+/* Follows the OS setting unless the person has chosen, and the choice sticks
+   across reloads where the browser allows it. */
+const THEMES = { light:"Dark", dark:"Light" };
+function applyTheme(t){
+  document.documentElement.setAttribute("data-theme", t);
+  el("btn-theme").textContent = THEMES[t];
+  if (S.daily.length || S.teams.length) render();   // recolour the SVG charts
+}
+let theme = "light";
+try { theme = localStorage.getItem("qcTheme") || ""; } catch(e){ theme = ""; }
+if (!theme) theme = matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
+applyTheme(theme);
+el("btn-theme").addEventListener("click", () => {
+  theme = theme === "dark" ? "light" : "dark";
+  try { localStorage.setItem("qcTheme", theme); } catch(e){}
+  applyTheme(theme);
+});
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
 el("btn-run").addEventListener("click", runQuery);
 ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
