@@ -100,9 +100,11 @@ button[disabled]{opacity:.4;cursor:not-allowed}
   letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px}
 .kpi .d{font-size:11px;color:var(--steel-light);margin-top:2px}
 
-.grid2{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1.3fr);gap:14px}
-@media(max-width:900px){.grid2{grid-template-columns:1fr}}
 .chart{width:100%;display:block;overflow:visible}
+.trendhit{cursor:pointer}
+.trendhit:hover rect{fill:rgba(16,21,28,.05)}
+.trendhit.nolink{cursor:default}
+.trendhit.nolink:hover rect{fill:transparent}
 
 .seg{display:inline-flex;border:1px solid var(--rule);border-radius:var(--radius);overflow:hidden}
 .seg button{background:var(--card);color:var(--steel);border:none;border-right:1px solid var(--rule);
@@ -386,27 +388,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div id="kpis"></div>
   </div>
 
-  <div class="grid2">
-    <div class="panel">
-      <div class="panel-head"><h2>Cost and accuracy by dealer type</h2><span class="status" id="cat-n"></span></div>
-      <div class="panel-body"><svg class="chart" id="chart-cat"></svg></div>
-    </div>
-    <div class="panel">
-      <div class="panel-head"><h2 id="trend-title">Daily output and rate</h2><span class="status" id="trend-n">bars = images · line = cost/image</span></div>
-      <div class="panel-body"><svg class="chart" id="chart-trend"></svg></div>
-    </div>
-  </div>
-
   <div class="panel">
     <div class="panel-head">
-      <div class="seg" id="seg">
-        <button data-v="accounts" class="on">Accounts</button>
-        <button data-v="teams">Rooftops</button>
-      </div>
-      <span class="status" id="row-n"></span>
+      <h2 id="trend-title">Daily output and rate</h2>
+      <span class="status" id="trend-n"></span>
     </div>
-    <div class="tablewrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
+    <div class="panel-body"><svg class="chart" id="chart-trend"></svg></div>
   </div>
+
+</div>
 
 </div>
 
@@ -415,7 +405,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v5 · 27 Aug 2026";
+const VERSION = "v6 · 27 Aug 2026";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -623,8 +613,12 @@ LIMIT 500`;
 const S = { daily:[], teams:[], excluded:[], view:"accounts",
             sortKey:"cpi", sortDir:-1, token:null };
 
+/* Rates always show one decimal so a column reads evenly — Intl drops trailing
+   zeros otherwise and you get 0.4 next to 0.39 in the same column. */
 const money = n => CONFIG.symbol + new Intl.NumberFormat("en-IN",
-  {maximumFractionDigits: Math.abs(n) < 100 ? 2 : 0}).format(n);
+  Math.abs(n) < 1000
+    ? {minimumFractionDigits:1, maximumFractionDigits:1}
+    : {maximumFractionDigits:0}).format(n);
 const int  = n => new Intl.NumberFormat("en-IN").format(Math.round(n));
 const dec  = (n,d=1) => Number(n).toFixed(d);
 const pct  = n => n == null ? "—" : dec(n,1) + "%";
@@ -1088,11 +1082,9 @@ function render(){
   markActive(); renderScope(teams, scoped);
   renderHero(pms, T, scoped);
   renderKpis(T, scoped, teams);
-  renderCategories(teams, T);
   renderTrend(rows, teams, T, scoped);
-  renderTable(pms, teams, T, scoped);
   document.querySelectorAll(".segrow").forEach(tr =>
-    tr.addEventListener("click", () => openDrill(tr.dataset.seg)));
+    tr.addEventListener("click", () => openDrill("segment", tr.dataset.seg)));
   if (S.drill) renderDrill();   // keep an open drill in step with the filters
 }
 
@@ -1278,24 +1270,49 @@ function segmentTable(teams, T){
 /* ==========================================================================
    Drill-down: one row per rooftop inside a segment
    ========================================================================== */
-const DRILL_COLS = [
-  ["enterprise",  "Enterprise",    "text"],
-  ["rooftop",     "Rooftop",       "text"],
-  ["vins",        "VINs",          "int"],
-  ["images",      "Images",        "int"],
-  ["imagesPerVin","Images / VIN",  "dec"],
-  ["cost",        "Delivery cost", "money"],
-  ["cpi",         "Cost / image",  "money"],
-  ["costPerVin",  "Cost / VIN",    "money"],
-  ["costToServe", "Cost to serve", "pct"],
-  ["acc",         "True accuracy", "acc"]
-];
+const DRILL = {
+  segment: {
+    eyebrow: "Segment",
+    cols: [
+      ["enterprise",  "Enterprise",    "text"],
+      ["rooftop",     "Rooftop",       "text"],
+      ["vins",        "VINs",          "int"],
+      ["images",      "Images",        "int"],
+      ["imagesPerVin","Images / VIN",  "dec"],
+      ["cost",        "Delivery cost", "money"],
+      ["cpi",         "Cost / image",  "money"],
+      ["costPerVin",  "Cost / VIN",    "money"],
+      ["costToServe", "Cost to serve", "pct"],
+      ["acc",         "True accuracy", "acc"]
+    ],
+    find: "Find rooftop\u2026",
+    match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
+                 || (r.enterprise||"").toLowerCase().includes(q),
+    build: segmentDrill
+  },
+  day: {
+    eyebrow: "Day",
+    cols: [
+      ["name",   "Person",        "text"],
+      ["email",  "Email",         "text"],
+      ["hours",  "Hours",         "int"],
+      ["images", "Images",        "int"],
+      ["iph",    "Images / hr",   "dec"],
+      ["cost",   "Delivery cost", "money"],
+      ["cpi",    "Cost / image",  "money"]
+    ],
+    find: "Find person\u2026",
+    match: (r,q) => (r.name||"").toLowerCase().includes(q)
+                 || (r.email||"").toLowerCase().includes(q),
+    build: dayDrill
+  }
+};
 
-function drillRows(segKey){
+function segmentDrill(key){
   const teams = teamView();
   const pinned = pinSegments(teams);
-  const scope = segKey === "All segments"
-    ? teams : teams.filter(t => segOf(pinned, t) === segKey);
+  const scope = key === "All segments"
+    ? teams : teams.filter(t => segOf(pinned, t) === key);
   const m = new Map(), all = blankAgg("All rooftops");
   for (const t of scope){
     let x = m.get(t.team_id);
@@ -1303,12 +1320,37 @@ function drillRows(segKey){
       {enterprise:t.enterprise, rooftop:t.team_name}));
     addAgg(x, t); addAgg(all, t);
   }
-  return { rows: [...m.values()].map(deriveAgg), total: deriveAgg(all), count: scope.length };
+  return { rows:[...m.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
+}
+
+/* A date only exists per person — once hourly rows are rolled to a day there is
+   no rooftop on them — so a day opens as the people who worked it. */
+function dayDrill(date){
+  const m = new Map();
+  const t = {hours:0, images:0, cost:0, priced:0};
+  for (const r of dailyView()){
+    if (r.work_date !== date) continue;
+    let x = m.get(r.email);
+    if (!x) m.set(r.email, x = {key:r.email, email:r.email, name:r.name,
+      hours:0, images:0, cost:0, priced:0});
+    x.hours += r.hours; x.images += r.images;
+    t.hours += r.hours; t.images += r.images;
+    if (r.allocated_cost != null){
+      x.cost += r.allocated_cost; x.priced += r.images;
+      t.cost += r.allocated_cost; t.priced += r.images;
+    }
+  }
+  const fin = x => ({...x,
+    iph: x.hours ? x.images/x.hours : null,
+    cpi: x.priced ? x.cost/x.priced : null });
+  return { rows:[...m.values()].map(fin),
+           total: fin({...t, key:"All people", name:"All people", email:""}),
+           unit:"people" };
 }
 
 function fmtDrill(r, key, kind){
   const v = r[key];
-  if (kind === "text")  return esc(v || "—");
+  if (kind === "text")  return esc(v || "\u2014");
   if (v == null)        return DASH;
   if (kind === "int")   return v ? int(v) : DASH;
   if (kind === "dec")   return dec(v, 1);
@@ -1318,8 +1360,10 @@ function fmtDrill(r, key, kind){
   return esc(v);
 }
 
-function openDrill(segKey){
-  S.drill = { key: segKey, sortKey: "images", sortDir: -1 };
+function openDrill(type, key){
+  S.drill = { type, key, sortKey:"images", sortDir:-1 };
+  el("drill-eyebrow").textContent = DRILL[type].eyebrow;
+  el("drill-find").placeholder = DRILL[type].find;
   el("drill-find").value = "";
   renderDrill();
   el("drill").classList.add("show");
@@ -1329,12 +1373,11 @@ function closeDrill(){ el("drill").classList.remove("show"); S.drill = null; }
 
 function renderDrill(){
   if (!S.drill) return;
-  const { key, sortKey, sortDir } = S.drill;
-  const { rows, total } = drillRows(key);
+  const { type, key, sortKey, sortDir } = S.drill;
+  const spec = DRILL[type];
+  const { rows, total, unit } = spec.build(key);
   const q = el("drill-find").value.trim().toLowerCase();
-  const shown = q ? rows.filter(r =>
-    (r.rooftop||"").toLowerCase().includes(q) ||
-    (r.enterprise||"").toLowerCase().includes(q)) : rows;
+  const shown = q ? rows.filter(r => spec.match(r, q)) : rows;
 
   shown.sort((a,b) => {
     const av = a[sortKey], bv = b[sortKey];
@@ -1344,22 +1387,25 @@ function renderDrill(){
   });
 
   el("drill-title").textContent = key;
-  el("drill-sub").textContent =
-    `${int(shown.length)}${q ? " of " + int(rows.length) : ""} rooftops · `
-    + `${int(new Set(rows.map(r => r.enterprise)).size)} enterprises`;
+  el("drill-sub").textContent = `${int(shown.length)}${q ? " of " + int(rows.length) : ""} ${unit}`
+    + (type === "segment"
+        ? ` \u00b7 ${int(new Set(rows.map(r => r.enterprise)).size)} enterprises` : "");
 
-  el("drill-tab").querySelector("thead").innerHTML = "<tr>" + DRILL_COLS.map(([k,l]) =>
+  el("drill-tab").querySelector("thead").innerHTML = "<tr>" + spec.cols.map(([k,l]) =>
     `<th data-k="${k}" class="${k===sortKey ? "sorted"+(sortDir===1?" asc":"") : ""}">${l}</th>`
   ).join("") + "</tr>";
 
   el("drill-tab").querySelector("tbody").innerHTML = shown.length
-    ? shown.map(r => "<tr>" + DRILL_COLS.map(([k,,kind]) =>
+    ? shown.map(r => "<tr>" + spec.cols.map(([k,,kind]) =>
         `<td>${fmtDrill(r, k, kind)}</td>`).join("") + "</tr>").join("")
-    : `<tr><td colspan="${DRILL_COLS.length}" class="drill-empty">No rooftops match that search.</td></tr>`;
+    : `<tr><td colspan="${spec.cols.length}" class="drill-empty">Nothing matches that search.</td></tr>`;
 
-  /* The footer totals the rows on screen, so it agrees with what's visible
-     rather than silently reporting the unfiltered segment. */
-  const foot = q ? deriveAgg(shown.reduce((acc, r) => {
+  /* The footer totals what's on screen, so a filtered view never shows a total
+     that contradicts the rows above it. */
+  let foot = total;
+  if (q && shown.length){
+    if (type === "segment"){
+      foot = deriveAgg(shown.reduce((acc,r) => {
         acc.ents.add(r.enterprise); acc.roofs.add(r.key);
         acc.images += r.images; acc.priced += r.priced; acc.cost += r.cost;
         acc.vins += r.vins; acc.costWithVins += r.costWithVins;
@@ -1367,11 +1413,19 @@ function renderDrill(){
         acc.arrMonth += r.arrMonth; acc.costWithArr += r.costWithArr;
         acc.accNum += r.accNum; acc.accDen += r.accDen;
         return acc;
-      }, blankAgg("Matching rooftops"))) : total;
-  el("drill-tab").querySelector("tfoot").innerHTML = "<tr>" + DRILL_COLS.map(([k,,kind]) =>
-    k === "enterprise" ? `<td>${foot.key}</td>`
-    : k === "rooftop"  ? `<td>${int(foot.roofs)} rooftops</td>`
-    : `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
+      }, blankAgg("Matching")));
+    }else{
+      const t = shown.reduce((a,r) => ({hours:a.hours+r.hours, images:a.images+r.images,
+        cost:a.cost+r.cost, priced:a.priced+r.priced}), {hours:0,images:0,cost:0,priced:0});
+      foot = {...t, name:"Matching",
+        iph: t.hours ? t.images/t.hours : null, cpi: t.priced ? t.cost/t.priced : null};
+    }
+  }
+  const label = type === "segment"
+    ? [`<td>${esc(foot.key || "All rooftops")}</td>`, `<td>${int(foot.roofs)} rooftops</td>`]
+    : [`<td>${esc(foot.name)}</td>`, `<td>${int(shown.length)} people</td>`];
+  el("drill-tab").querySelector("tfoot").innerHTML = "<tr>" + spec.cols.map(([k,,kind],i) =>
+    i < 2 ? label[i] : `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
 
   el("drill-tab").querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
     const k = th.dataset.k;
@@ -1381,39 +1435,15 @@ function renderDrill(){
   }));
 }
 
-function renderCategories(teams, T){
-  const svg = el("chart-cat");
-  const rows = rollTeams(teams, r => r.dealer_type, r => ({label:r.dealer_type}))
-    .filter(r => r.priced > 0).sort((a,b) => b.cpi - a.cpi);
-  el("cat-n").textContent = rows.length ? `${rows.length} dealer types` : "";
-  if (!rows.length){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
-
-  const W = svg.clientWidth || 460, rowH = 52, H = rows.length*rowH + 8;
-  const labelW = Math.min(140, W*0.3), barMax = W-labelW-78;
-  const max = Math.max(...rows.map(r => r.cpi));
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
-  svg.innerHTML = rows.map((t,i) => {
-    const y = i*rowH+8, w = Math.max(2, t.cpi/max*barMax);
-    const accW = t.accuracy == null ? 0 : (t.accuracy/100)*barMax;
-    return `<text x="0" y="${y+14}" font-family="IBM Plex Sans Condensed" font-size="12" font-weight="600" fill="var(--ink)">${esc(t.label)}</text>`
-      + `<text x="0" y="${y+29}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(t.images)} img · ${t.rooftops} rooftops</text>`
-      + `<rect x="${labelW}" y="${y+4}" width="${w}" height="15" rx="1" fill="${costColor(t.cpi/(T.blended||1))}"/>`
-      + `<text x="${labelW+w+8}" y="${y+16}" font-family="IBM Plex Mono" font-size="11" fill="var(--ink)">${money(t.cpi)}</text>`
-      + (t.accuracy == null ? "" :
-          `<rect x="${labelW}" y="${y+25}" width="${barMax}" height="7" rx="1" fill="var(--rule-soft)"/>`
-        + `<rect x="${labelW}" y="${y+25}" width="${accW}" height="7" rx="1" fill="var(--steel-light)"/>`
-        + `<text x="${labelW+barMax+8}" y="${y+32}" font-family="IBM Plex Mono" font-size="11" fill="var(--steel)">${pct(t.accuracy)}</text>`);
-  }).join("");
-}
-
-/* daily when unscoped; monthly from team rows when scoped, so the chart
-   actually respects the account filter instead of showing everything */
+/* Daily when unscoped; monthly from team rows when an account filter is on, so
+   the chart respects the filter instead of quietly showing everything. Bars are
+   coloured on the same cost ramp as the rest of the page — colour means rate,
+   height means volume, so an expensive quiet day is visible at a glance. */
 function renderTrend(rows, teams, T, scoped){
   const svg = el("chart-trend");
-  let pts;
+  let pts, grain;
   if (scoped){
-    el("trend-title").textContent = "Monthly output and rate";
-    el("trend-n").textContent = "bars = images · line = cost/image";
+    grain = "month";
     const m = new Map();
     for (const t of teams){
       const d = m.get(t.month_key) || {date:t.month_key, images:0, cost:0, priced:0};
@@ -1423,8 +1453,7 @@ function renderTrend(rows, teams, T, scoped){
     }
     pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
   }else{
-    el("trend-title").textContent = "Daily output and rate";
-    el("trend-n").textContent = "bars = images · line = cost/image";
+    grain = "day";
     const m = new Map();
     for (const r of rows){
       const d = m.get(r.work_date) || {date:r.work_date, images:0, cost:0, priced:0};
@@ -1435,96 +1464,62 @@ function renderTrend(rows, teams, T, scoped){
     pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
   }
   pts = pts.map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+
+  el("trend-title").textContent = scoped ? "Monthly output and rate" : "Daily output and rate";
+  el("trend-n").textContent = pts.length
+    ? `${pts.length} ${grain}s · bar height = images, colour = cost per image`
+      + (grain === "day" ? " · click a bar for that day" : "")
+    : "";
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
-  const W = svg.clientWidth || 620, H = 248, padT = 12, padB = 26, padR = 48;
-  const iw = W-padR, plotH = H-padT-padB;
+  const W = svg.clientWidth || 1160, H = 330;
+  const padL = 54, padR = 52, padT = 16, padB = 34;
+  const pw = W-padL-padR, plotH = H-padT-padB;
   const maxImg = Math.max(...pts.map(d => d.images)) || 1;
-  const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.15) || 1;
-  const step = iw/pts.length, bw = Math.max(1, Math.min(46, step-6));
-  const cx = i => i*step + step/2, cy = v => padT + plotH - v/maxCpi*plotH;
+  const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.2) || 1;
+  const step = pw/pts.length, bw = Math.max(1.5, Math.min(52, step-3));
+  const cx = i => padL + i*step + step/2;
+  const cy = v => padT + plotH - v/maxCpi*plotH;
 
-  let s = pts.map((d,i) => {
-    const h = d.images/maxImg*plotH;
-    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-h}" width="${bw}" height="${h}" fill="var(--rule)"/>`;
+  let s = "";
+  for (let i=0; i<=4; i++){
+    const y = padT + plotH*i/4;
+    s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
+       + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(maxImg*(1-i/4))}</text>`
+       + `<text x="${W-padR+8}" y="${y+3}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi*(1-i/4))}</text>`;
+  }
+  s += pts.map((d,i) => {
+    const hgt = d.images/maxImg*plotH;
+    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="1" `
+      + `fill="${costColor(d.cpi/(T.blended||1))}" opacity=".62"/>`;
   }).join("");
-  s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round"/>`;
-  s += pts.map((d,i) => `<g><title>${d.date} · ${int(d.images)} images · ${money(d.cpi)} per image</title>`
-    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="8" fill="transparent"/>`
-    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.4" fill="${costColor(d.cpi/(T.blended||1))}"/></g>`).join("");
-  s += `<text x="${W}" y="${padT+8}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi)}</text>`
-     + `<text x="0" y="${H-6}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${pts[0].date}</text>`
-     + `<text x="${iw}" y="${H-6}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${pts[pts.length-1].date}</text>`;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.innerHTML = s;
-}
+  s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" `
+     + `stroke="var(--ink)" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>`;
+  s += pts.map((d,i) =>
+    `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.6" fill="var(--card)" `
+    + `stroke="var(--ink)" stroke-width="1.4"/>`).join("");
 
-const COLS = {
-  accounts:[["label","Enterprise"],["stage","Stage"],["rooftops","Rooftops"],
-    ["images","Images"],["vins","VINs"],["arrMonth","ARR / mo"],["cost","Delivery cost"],
-    ["costRatio","Cost of ARR"],["accuracy","Accuracy"],["cpi","Cost/image"]],
-  teams:   [["label","Rooftop"],["sub","Enterprise"],["stage","Stage"],["segment","Segment"],
-    ["images","Images"],["vins","VINs"],["arrMonth","ARR / mo"],["cost","Delivery cost"],
-    ["costRatio","Cost of ARR"],["accuracy","Accuracy"],["cpi","Cost/image"]]
-};
+  // full-height hit areas so the whole column is clickable, not just the bar
+  s += pts.map((d,i) =>
+    `<g class="${grain === "day" ? "trendhit" : "trendhit nolink"}" data-date="${d.date}">`
+    + `<title>${d.date}\n${int(d.images)} images · ${money(d.cpi)} per image`
+    + `\n${money(d.cost)} delivery cost${grain === "day" ? "\nClick for the people behind it" : ""}</title>`
+    + `<rect x="${cx(i)-step/2}" y="${padT}" width="${step}" height="${plotH}" fill="transparent"/></g>`
+  ).join("");
 
-function renderTable(pms, teams, T, scoped){
-  const v = S.view;
-  let data;
-  if (v === "accounts") data = rollTeams(teams, r => r.enterprise, r => ({label:r.enterprise}));
-  if (v === "teams")    data = rollTeams(teams, r => r.team_id,
-    r => ({label:r.team_name, sub:r.enterprise, segment:r.segment, dealer_type:r.dealer_type}));
+  const every = Math.ceil(pts.length/12);
+  s += pts.map((d,i) => i % every ? "" :
+    `<text x="${cx(i)}" y="${H-12}" text-anchor="middle" font-family="IBM Plex Mono" `
+    + `font-size="10" fill="var(--steel-light)">${grain === "day" ? d.date.slice(5) : d.date}</text>`).join("");
+  s += `<text x="${padL}" y="${H-12}" font-family="IBM Plex Sans Condensed" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">IMAGES</text>`
+     + `<text x="${W-padR}" y="${H-12}" text-anchor="end" font-family="IBM Plex Sans Condensed" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">COST / IMAGE</text>`;
 
-  const cols = COLS[v];
-  if (!cols.some(c => c[0] === S.sortKey)) S.sortKey = "cpi";
-  data.sort((a,b) => {
-    const av = a[S.sortKey], bv = b[S.sortKey];
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * S.sortDir;
-  });
-  el("row-n").textContent = `${int(data.length)} ${v === "accounts" ? "enterprises" : "rooftops"}`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
+  svg.innerHTML = s;
 
-  document.querySelector("#tbl thead").innerHTML = "<tr>" + cols.map(([k,l]) =>
-    `<th data-k="${k}" class="${k===S.sortKey?"sorted":""}">${l}</th>`).join("") + "</tr>";
-
-  document.querySelector("#tbl tbody").innerHTML = data.map(r => {
-    const c = r.cpi == null ? "var(--steel-light)" : costColor(r.cpi/(T.blended||1));
-    const cpi = r.cpi == null ? `<span style="color:var(--steel-light)">unpriced</span>`
-      : `<span class="cpi-cell"><span class="chip" style="background:${c}"></span>${money(r.cpi)}</span>`;
-    const acc = r.accuracy == null ? `<span style="color:var(--steel-light)">no data</span>`
-      : `<span class="bar" style="width:${Math.round(r.accuracy/2.2)}px"></span>${pct(r.accuracy)}`;
-    const stage = !r.stage ? `<span style="color:var(--steel-light)">—</span>`
-      : `<span class="tag${r.stage==="Churned"?" tag-warn":""}">${esc(r.stage)}</span>`;
-    const arr = r.arrMonth == null ? `<span style="color:var(--steel-light)">—</span>` : money(r.arrMonth);
-    const ratio = r.costRatio == null ? `<span style="color:var(--steel-light)">—</span>`
-      : `<span style="color:${r.costRatio > 100 ? "var(--cost-high)" : "inherit"}">${dec(r.costRatio,1)}%</span>`;
-    if (v === "accounts"){
-      return `<tr><td>${esc(r.label)}</td>
-        <td style="text-align:left">${stage}</td>
-        <td class="num">${int(r.rooftops)}</td>
-        <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
-        <td class="num">${arr}</td>
-        <td class="num">${r.cost?money(r.cost):"—"}</td>
-        <td class="num">${ratio}</td>
-        <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
-    }
-    return `<tr>
-      <td><div class="who"><span>${esc(r.label)}</span><span class="m num">${esc(r.key)}</span></div></td>
-      <td style="text-align:left;color:var(--steel)">${esc(r.sub||"—")}</td>
-      <td style="text-align:left">${stage}</td>
-      <td style="text-align:left">${r.segment?`<span class="tag">${esc(r.segment)}</span>`:"—"}</td>
-      <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
-      <td class="num">${arr}</td>
-      <td class="num">${r.cost?money(r.cost):"—"}</td>
-      <td class="num">${ratio}</td>
-      <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
-  }).join("");
-
-  document.querySelectorAll("#tbl th").forEach(th => th.addEventListener("click", () => {
-    const k = th.dataset.k;
-    S.sortDir = S.sortKey === k ? -S.sortDir : -1;
-    S.sortKey = k; render();
-  }));
+  if (grain === "day")
+    svg.querySelectorAll(".trendhit").forEach(g =>
+      g.addEventListener("click", () => openDrill("day", g.dataset.date)));
 }
 
 /* ==========================================================================
@@ -1634,13 +1629,6 @@ el("btn-clear").addEventListener("click", () => {
   fillRooftops(); render();
 });
 
-document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click", () => {
-  document.querySelectorAll("#seg button").forEach(x => x.classList.remove("on"));
-  b.classList.add("on");
-  S.view = b.dataset.v; S.sortKey = "cpi"; S.sortDir = -1;
-  render();
-}));
-
 el("btn-csv").addEventListener("click", () => {
   const teams = teamView();
   const rows = [["month","team_id","rooftop","enterprise","segment","poc","dealer_type",
@@ -1664,21 +1652,20 @@ el("drill-find").addEventListener("input", renderDrill);
 
 el("drill-csv").addEventListener("click", () => {
   if (!S.drill) return;
-  const { rows, total } = drillRows(S.drill.key);
+  const spec = DRILL[S.drill.type];
+  const { rows, total } = spec.build(S.drill.key);
   const q = el("drill-find").value.trim().toLowerCase();
-  const shown = q ? rows.filter(r => (r.rooftop||"").toLowerCase().includes(q)
-                                  || (r.enterprise||"").toLowerCase().includes(q)) : rows;
-  const num = (r,k) => r[k] == null ? "" : (typeof r[k] === "number" ? +r[k].toFixed(4) : r[k]);
-  const out = [DRILL_COLS.map(c => c[1]),
-    ...shown.map(r => DRILL_COLS.map(([k]) =>
-      k === "enterprise" ? r.enterprise : k === "rooftop" ? r.rooftop : num(r,k))),
-    DRILL_COLS.map(([k]) =>
-      k === "enterprise" ? total.key : k === "rooftop" ? total.roofs : num(total,k))];
+  const shown = q ? rows.filter(r => spec.match(r, q)) : rows;
+  const cell = (r,k) => r[k] == null ? ""
+    : (typeof r[k] === "number" ? +r[k].toFixed(4) : r[k]);
+  const out = [spec.cols.map(c => c[1]),
+    ...shown.map(r => spec.cols.map(([k]) => cell(r,k))),
+    spec.cols.map(([k],i) => i === 0 ? "TOTAL" : cell(total,k))];
   const csv = out.map(r => r.map(v =>
     /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v).join(",")).join("\n");
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
-  a.download = `qc_${S.drill.key.toLowerCase().replace(/[^a-z0-9]+/g,"_")}_rooftops.csv`;
+  a.download = `qc_${S.drill.type}_${S.drill.key.toLowerCase().replace(/[^a-z0-9]+/g,"_")}.csv`;
   a.click();
 });
 
