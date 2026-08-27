@@ -138,9 +138,80 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 .rise{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.rise{animation:none}*{transition:none!important}}
+
+/* ---------- sign-in gate ---------- */
+#gate{position:fixed;inset:0;z-index:100;background:#0b1017;color:#e7ecf2;
+  display:grid;grid-template-columns:1.15fr .85fr;overflow:auto}
+@media(max-width:860px){#gate{grid-template-columns:1fr;grid-template-rows:auto 1fr}}
+.gate-brand{padding:clamp(32px,6vw,72px);display:flex;flex-direction:column;justify-content:center;gap:26px}
+.gate-mark{width:38px;height:38px;border-radius:7px;background:#182231;
+  display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:9px}
+.gate-mark i{display:block;border-radius:1px;background:#4f6478}
+.gate-mark i:nth-child(1){background:#0e7c66}
+.gate-mark i:nth-child(4){background:#9e1b32}
+.gate-brand h1{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;
+  font-size:clamp(38px,6.5vw,68px);line-height:.95;letter-spacing:-.02em;color:#fff}
+.gate-brand h1 span{color:#5b7488;display:block}
+.gate-tag{color:#8fa2b4;font-size:15px;max-width:34ch;line-height:1.6}
+.gate-strip{margin-top:6px}
+.gate-strip svg{width:100%;max-width:440px;height:74px;display:block;overflow:visible}
+.gate-legend{font-family:"IBM Plex Mono",monospace;font-size:11px;color:#5b7488;margin-top:9px}
+
+.gate-side{background:#0e141c;border-left:1px solid #1b2634;
+  display:flex;align-items:center;justify-content:center;padding:32px}
+@media(max-width:860px){.gate-side{border-left:none;border-top:1px solid #1b2634}}
+.gate-card{width:100%;max-width:344px}
+.gate-card h2{font-family:"IBM Plex Sans Condensed",sans-serif;font-size:17px;color:#fff;margin-bottom:6px}
+.gate-card p{color:#8fa2b4;font-size:13px;line-height:1.6;margin:0 0 20px}
+#gate-msg{display:none;border:1px solid #6b4a1c;background:#1d1608;color:#e0b464;
+  padding:10px 13px;border-radius:3px;font-size:13px;margin-bottom:16px;line-height:1.5}
+#gate-msg.show{display:block}
+.gbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;
+  background:#fff;color:#1c2530;border:none;border-radius:4px;padding:13px 16px;
+  font-family:"IBM Plex Sans",sans-serif;font-weight:500;font-size:14.5px;
+  letter-spacing:0;text-transform:none;cursor:pointer}
+.gbtn:hover{background:#eef2f6;opacity:1}
+.gbtn[disabled]{opacity:.55}
+.gbtn svg{width:18px;height:18px;flex:none}
+.gate-foot{margin-top:18px;color:#5b7488;font-size:12px;display:flex;align-items:center;gap:7px}
+.gate-foot svg{width:13px;height:13px;flex:none;opacity:.8}
+
+.whoami{display:flex;align-items:center;gap:9px;font-size:12px;color:var(--steel)}
+.whoami .em{font-family:"IBM Plex Mono",monospace}
+.whoami button{background:transparent;color:var(--steel);border-color:var(--rule);
+  padding:5px 9px;font-size:10px}
 </style>
 </head>
 <body>
+<div id="gate">
+  <div class="gate-brand">
+    <div class="gate-mark"><i></i><i></i><i></i><i></i></div>
+    <h1>QC Cost<span>&amp; Accuracy</span></h1>
+    <div class="gate-tag">What every image costs to review, which rooftops cost the most,
+      and whether the expensive ones are any more accurate.</div>
+    <div class="gate-strip">
+      <svg viewBox="0 0 440 74" aria-hidden="true"><g id="gate-ticks"></g>
+        <line x1="0" y1="56" x2="440" y2="56" stroke="#1b2634"/></svg>
+      <div class="gate-legend">cost per image, one tick per reviewer</div>
+    </div>
+  </div>
+  <div class="gate-side">
+    <div class="gate-card">
+      <h2>Sign in to continue</h2>
+      <p>Delivery operations · Spyne</p>
+      <div id="gate-msg"></div>
+      <button class="gbtn" id="gate-btn">
+        <svg viewBox="0 0 48 48"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9 3.6l6.8-6.8C35.6 2.4 30.2 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.2C12.4 13.7 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.1 24.6c0-1.6-.1-3.1-.4-4.6H24v9.1h12.4c-.5 2.9-2.2 5.3-4.6 7l7.7 6c4.5-4.2 7.1-10.3 7.1-17.5z"/><path fill="#FBBC05" d="M10.5 28.6c-.5-1.4-.8-2.9-.8-4.6s.3-3.2.8-4.6l-7.9-6.2C1 16.3 0 20 0 24s1 7.7 2.6 10.8l7.9-6.2z"/><path fill="#34A853" d="M24 48c6.2 0 11.5-2 15.3-5.5l-7.7-6c-2.1 1.4-4.8 2.3-7.6 2.3-6.3 0-11.6-4.2-13.5-9.9l-7.9 6.2C6.5 42.6 14.6 48 24 48z"/></svg>
+        <span id="gate-btn-text">Continue with Google</span>
+      </button>
+      <div class="gate-foot">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+        <span id="gate-domains"></span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <div class="wrap">
 
   <div class="topbar">
@@ -150,8 +221,10 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <div class="sub">Salary on email + month · AI accuracy on team + month.</div>
     </div>
     <div class="actions">
+      <span class="whoami"><span class="em" id="who"></span>
+        <button id="btn-out">Sign out</button></span>
       <button class="ghost" id="btn-csv">Export CSV</button>
-      <button id="btn-run">Run query</button>
+      <button id="btn-run">Refresh</button>
     </div>
   </div>
 
@@ -246,6 +319,10 @@ const CONFIG = {
   clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",
   symbol  : "\u20B9",
   qcDomains: ["spyne.co.in"],
+
+  // Who may open the page. This is a courtesy check only — the real gates are
+  // the Google test-user list and BigQuery IAM, both enforced server-side.
+  allowedDomains: ["spyne.ai", "spyne.co.in"],
   jsonFallback: "data.json"
 };
 
@@ -416,26 +493,98 @@ const clearAlerts = () => { el("alerts").innerHTML = ""; el("coverage").innerHTM
 /* ==========================================================================
    4. DATA IN
    ========================================================================== */
-function getToken(){
+const AUTH = { email:null, token:null };
+let tokenClient = null, pending = null;
+
+function gisReady(){
   return new Promise((resolve, reject) => {
-    if (!CONFIG.clientId) return reject(new Error("No OAuth client ID set in CONFIG.clientId."));
-    if (!window.google?.accounts?.oauth2) return reject(new Error(
-      "Google sign-in hasn't loaded yet. Wait a moment and try again."));
-    google.accounts.oauth2.initTokenClient({
-      client_id: CONFIG.clientId,
-      scope: "https://www.googleapis.com/auth/bigquery.readonly",
-      callback: r => r.access_token ? resolve(r.access_token) : reject(new Error("Sign-in was cancelled."))
-    }).requestAccessToken();
+    const t0 = Date.now();
+    (function poll(){
+      if (window.google?.accounts?.oauth2) return resolve();
+      if (Date.now() - t0 > 12000) return reject(new Error("Google sign-in failed to load."));
+      setTimeout(poll, 120);
+    })();
   });
+}
+
+function initTokenClient(){
+  if (tokenClient) return;
+  tokenClient = google.accounts.oauth2.initTokenClient({
+    client_id: CONFIG.clientId,
+    scope: "https://www.googleapis.com/auth/bigquery.readonly email",
+    callback: r => { const p = pending; pending = null;
+      if (!p) return;
+      r?.access_token ? p.resolve(r) : p.reject(new Error("Sign-in was cancelled.")); },
+    error_callback: e => { const p = pending; pending = null;
+      if (p) p.reject(new Error(e?.type === "popup_closed"
+        ? "Sign-in window was closed." : "Sign-in didn't complete.")); }
+  });
+}
+
+/* prompt:'' asks Google for a token without showing anything. It succeeds when
+   the person already has a Google session and has consented before — which is
+   why the page can load straight into data instead of waiting for a click. */
+function requestToken(silent){
+  return new Promise((resolve, reject) => {
+    pending = { resolve, reject };
+    try { tokenClient.requestAccessToken(silent ? {prompt:""} : {}); }
+    catch(e){ pending = null; reject(e); }
+  });
+}
+
+async function signIn(silent){
+  await gisReady();
+  if (!CONFIG.clientId) throw new Error("No OAuth client ID set in CONFIG.clientId.");
+  initTokenClient();
+  const r = await requestToken(silent);
+  AUTH.token = r.access_token;
+
+  const res = await fetch("https://www.googleapis.com/oauth2/v3/userinfo",
+    { headers:{ Authorization:"Bearer " + AUTH.token } });
+  if (!res.ok) throw new Error("Couldn't read the signed-in account.");
+  const info = await res.json();
+  AUTH.email = (info.email || "").toLowerCase();
+
+  const domain = AUTH.email.split("@")[1] || "";
+  if (!CONFIG.allowedDomains.includes(domain)){
+    const bad = AUTH.email;
+    AUTH.token = null; AUTH.email = null;
+    throw new Error(`${bad} isn't a Spyne account. Sign in with your work address.`);
+  }
+  return AUTH.email;
+}
+
+function showGate(msg){
+  const m = el("gate-msg");
+  if (msg){ m.textContent = msg; m.classList.add("show"); }
+  else m.classList.remove("show");
+  el("gate").style.display = "grid";
+  setGateBusy(false);
+}
+function hideGate(){
+  el("gate").style.display = "none";
+  el("who").textContent = AUTH.email || "";
+}
+function setGateBusy(busy){
+  el("gate-btn").disabled = busy;
+  el("gate-btn-text").textContent = busy ? "Signing in…" : "Continue with Google";
+}
+function signOut(msg){
+  if (AUTH.token && window.google?.accounts?.oauth2)
+    try { google.accounts.oauth2.revoke(AUTH.token, () => {}); } catch(e){}
+  AUTH.token = null; AUTH.email = null;
+  S.daily = []; S.teams = []; S.excluded = [];
+  showGate(msg);
 }
 
 async function bq(sql){
   const res = await fetch(
     `https://bigquery.googleapis.com/bigquery/v2/projects/${CONFIG.project}/queries`,
     { method:"POST",
-      headers:{ Authorization:"Bearer "+S.token, "Content-Type":"application/json" },
+      headers:{ Authorization:"Bearer "+AUTH.token, "Content-Type":"application/json" },
       body: JSON.stringify({ query:sql, useLegacySql:false, timeoutMs:180000, maxResults:100000 }) });
   const data = await res.json();
+  if (res.status === 401){ const e = new Error("expired"); e.expired = true; throw e; }
   if (!res.ok) throw new Error(data.error?.message || `BigQuery returned ${res.status}`);
   if (!data.jobComplete) throw new Error("Query is still running — press Run query again in a moment.");
   const cols = (data.schema?.fields || []).map(f => f.name);
@@ -444,17 +593,16 @@ async function bq(sql){
 
 async function runQuery(){
   const btn = el("btn-run");
-  btn.disabled = true; btn.textContent = "Running…"; clearAlerts();
+  btn.disabled = true; btn.textContent = "Loading…"; clearAlerts();
   try{
-    if (!S.token) S.token = await getToken();
     const [a,b,c] = await Promise.all([
       bq(el("sql-a").value), bq(el("sql-b").value), bq(el("sql-c").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam); S.excluded = c.map(normExcl);
     afterLoad("BigQuery");
   }catch(e){
-    S.token = null;
-    alert_(`<b>Query didn't run.</b> ${esc(e.message)}`);
-  }finally{ btn.disabled = false; btn.textContent = "Run query"; }
+    if (e.expired) return signOut("Your session expired. Please sign in again.");
+    alert_(`<b>Couldn't load data.</b> ${esc(e.message)}`);
+  }finally{ btn.disabled = false; btn.textContent = "Refresh"; }
 }
 
 const num = v => v == null || v === "" ? null : Number(v);
@@ -1087,15 +1235,43 @@ el("btn-csv").addEventListener("click", () => {
 
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
 
-(async () => {
-  if (await loadJson()) return;
-  const s = sample();
-  S.daily = s.daily.map(normDaily);
-  S.teams = s.teams.map(normTeam);
-  S.excluded = s.excluded.map(normExcl);
-  alert_(`<b>Showing sample data.</b> Press <b>Run query</b> to sign in and pull from BigQuery.`);
-  afterLoad("sample data");
+/* decorative strip on the sign-in screen, drawn from the same cost ramp */
+(function gateArt(){
+  const g = el("gate-ticks"); if (!g) return;
+  let s = "";
+  for (let i = 0; i < 64; i++){
+    const t = i/63, jitter = ((i*37)%100)/100;
+    const x = 4 + t*432;
+    const h = 8 + Math.pow(Math.sin(t*Math.PI), .7) * 34 * (.45 + jitter*.55);
+    const c = costColor(.55 + t*1.35);
+    s += `<rect x="${x.toFixed(1)}" y="${(56-h).toFixed(1)}" width="2.6" height="${h.toFixed(1)}" rx="1" fill="${c}" opacity="${(.35+t*.5).toFixed(2)}"/>`;
+  }
+  g.innerHTML = s;
 })();
+
+el("gate-domains").textContent =
+  "Restricted to " + CONFIG.allowedDomains.map(d => "@"+d).join(" and ") + " accounts";
+
+el("gate-btn").addEventListener("click", async () => {
+  setGateBusy(true);
+  try{ await signIn(false); hideGate(); await runQuery(); }
+  catch(e){ showGate(e.message); }
+});
+el("btn-out").addEventListener("click", () => signOut());
+
+/* Load straight into data when Google can hand over a token silently. Only
+   people who have never consented, or whose session lapsed, see the gate. */
+(async () => {
+  try{
+    await signIn(true);
+    hideGate();
+    await runQuery();
+  }catch(e){
+    if (await loadJson()){ hideGate(); return; }
+    showGate(/cancel|complete|closed/i.test(e.message) ? "" : e.message);
+  }
+})();
+
 </script>
 </body>
 </html>
