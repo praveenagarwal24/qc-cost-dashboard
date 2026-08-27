@@ -1038,6 +1038,15 @@ function renderKpis(T, scoped){
     ["Churned cost", T.churnedCost ? money(T.churnedCost) : money(0),
       "spent on churned rooftops"]
   ];
+  const ops = [
+    ["True accuracy", pct(T.accuracy), "image-weighted"],
+    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
+  ];
+  if (!scoped) ops.push(
+    ["QC people", int(T.heads), `${int(T.headsInhouse)} inhouse · ${int(T.headsOs)} OS`],
+    ["Hours", int(T.hours), "distinct working hours"],
+    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"]);
+
   const cards = list => list.map(([l,v,d]) =>
     `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div>
      <div class="d">${d}</div></div>`).join("");
