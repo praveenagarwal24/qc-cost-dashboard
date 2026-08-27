@@ -167,6 +167,47 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.rise{animation:none}*{transition:none!important}}
 
+/* ---------- drill-down ---------- */
+.seghint{padding:9px var(--pad) 2px;font-size:11px;color:var(--steel-light);
+  font-family:"IBM Plex Mono",monospace}
+.segrow{cursor:pointer}
+.segrow:hover td{background:#f4f7fa}
+.segrow td:first-child::after{content:"›";color:var(--steel-light);margin-left:7px}
+
+.modal{position:fixed;inset:0;z-index:95;background:rgba(16,21,28,.5);
+  display:none;align-items:center;justify-content:center;padding:24px}
+.modal.show{display:flex}
+.modal-card{background:var(--card);border-radius:var(--radius);width:100%;
+  max-width:1200px;max-height:88vh;display:flex;flex-direction:column;overflow:hidden}
+.modal-head{display:flex;align-items:flex-start;justify-content:space-between;gap:16px;
+  padding:16px var(--pad);border-bottom:1px solid var(--rule);flex:none}
+.modal-head h2{font-size:19px;margin:2px 0 3px}
+.modal-actions{display:flex;gap:7px;align-items:center;flex:none}
+.modal-actions input{width:160px}
+.modal-body{overflow:auto;flex:1;min-height:0}
+
+.drilltab{width:100%;border-collapse:separate;border-spacing:0;font-size:13px}
+.drilltab th{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--steel);text-align:right;
+  padding:10px 10px;white-space:nowrap;cursor:pointer;background:var(--card);
+  position:sticky;top:0;z-index:2;border-bottom:1px solid var(--rule)}
+.drilltab th:hover{color:var(--ink)}
+.drilltab th.sorted{color:var(--ink)}
+.drilltab th.sorted::after{content:" ↓";font-size:9px}
+.drilltab th.sorted.asc::after{content:" ↑"}
+.drilltab td{padding:9px 10px;text-align:right;white-space:nowrap;
+  border-bottom:1px solid var(--rule-soft);
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
+.drilltab th:first-child,.drilltab td:first-child{text-align:left;padding-left:var(--pad)}
+.drilltab th:nth-child(2),.drilltab td:nth-child(2){text-align:left}
+.drilltab td:first-child,.drilltab td:nth-child(2){font-family:"IBM Plex Sans",sans-serif}
+.drilltab th:last-child,.drilltab td:last-child{padding-right:var(--pad)}
+.drilltab tbody tr:hover td{background:#f7f9fb}
+.drilltab tfoot td{position:sticky;bottom:0;z-index:2;background:var(--card);
+  border-top:1px solid var(--rule);border-bottom:none;font-weight:500}
+.drilltab tfoot td:first-child{font-family:"IBM Plex Sans",sans-serif;color:var(--steel)}
+.drill-empty{padding:40px var(--pad);text-align:center;color:var(--steel)}
+
 /* ---------- loading ---------- */
 #loader{position:fixed;inset:0;z-index:90;background:#0b1017;color:#e7ecf2;
   display:none;flex-direction:column;align-items:center;justify-content:center;gap:30px}
@@ -224,6 +265,25 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 </style>
 </head>
 <body>
+<div class="modal" id="drill">
+  <div class="modal-card">
+    <div class="modal-head">
+      <div>
+        <div class="eyebrow" id="drill-eyebrow">Segment</div>
+        <h2 id="drill-title"></h2>
+        <div class="status" id="drill-sub"></div>
+      </div>
+      <div class="modal-actions">
+        <input type="text" id="drill-find" placeholder="Find rooftop…" autocomplete="off">
+        <button class="ghost tiny" id="drill-csv">Export CSV</button>
+        <button class="ghost tiny" id="drill-close">Close</button>
+      </div>
+    </div>
+    <div class="modal-body"><table class="drilltab" id="drill-tab">
+      <thead></thead><tbody></tbody><tfoot></tfoot></table></div>
+  </div>
+</div>
+
 <div id="loader">
   <div class="load-bars" id="load-bars"></div>
   <div id="load-msg">Connecting to BigQuery…</div>
@@ -355,7 +415,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v4 · 27 Aug 2026";
+const VERSION = "v5 · 27 Aug 2026";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -1031,6 +1091,9 @@ function render(){
   renderCategories(teams, T);
   renderTrend(rows, teams, T, scoped);
   renderTable(pms, teams, T, scoped);
+  document.querySelectorAll(".segrow").forEach(tr =>
+    tr.addEventListener("click", () => openDrill(tr.dataset.seg)));
+  if (S.drill) renderDrill();   // keep an open drill in step with the filters
 }
 
 function markActive(){
@@ -1132,71 +1195,190 @@ const SEG_ORDER = ["ent", "mid", "smb", "resellers"];
 const segRank = k => {
   const i = SEG_ORDER.indexOf(k.toLowerCase());
   if (i >= 0) return i;
-  return k === "No segment" ? 99 : 50;   // unknown segments sit before No segment
+  return k === "No segment" ? 99 : 50;
 };
 
-function segmentTable(teams, T){
-  const pinned = new Map();
+/* A rooftop can carry a segment in one month and none in another, so each is
+   pinned to its first known segment. Without that the same rooftop lands in two
+   buckets and the rows stop summing to the total. */
+function pinSegments(teams){
+  const p = new Map();
   for (const t of teams)
-    if (t.segment && !pinned.has(t.team_id)) pinned.set(t.team_id, t.segment);
+    if (t.segment && !p.has(t.team_id)) p.set(t.team_id, t.segment);
+  return p;
+}
+const segOf = (p, t) => p.get(t.team_id) || "No segment";
 
-  const blank = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
-    cost:0, vins:0, costWithVins:0, imagesWithVins:0,
-    arrMonth:0, costWithArr:0, accNum:0, accDen:0});
-  const add = (x, t) => {
-    x.ents.add(t.enterprise); x.roofs.add(t.team_id);
-    x.images += t.images; x.priced += t.images - t.unpriced_images;
-    x.cost += t.allocated_cost;
-    if (t.vins){
-      x.vins += t.vins;
-      x.costWithVins += t.allocated_cost;
-      x.imagesWithVins += t.images;   // numerator must match the VIN denominator
-    }
-    if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
-    if (t.true_accuracy != null && t.acc_images){
-      x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
-    }
-  };
-  const derive = x => ({...x,
-    ents: x.ents.size, roofs: x.roofs.size,
-    cpi: x.priced ? x.cost/x.priced : null,
-    imagesPerVin: x.vins ? x.imagesWithVins/x.vins : null,
-    costPerVin: x.vins ? x.costWithVins/x.vins : null,
-    costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
-    acc: x.accDen ? x.accNum/x.accDen : null });
+const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
+  cost:0, vins:0, costWithVins:0, imagesWithVins:0,
+  arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
-  const m = new Map(), all = blank("All segments");
-  for (const t of teams){
-    const k = pinned.get(t.team_id) || "No segment";
-    if (!m.has(k)) m.set(k, blank(k));
-    add(m.get(k), t); add(all, t);
+function addAgg(x, t){
+  x.ents.add(t.enterprise); x.roofs.add(t.team_id);
+  x.images += t.images; x.priced += t.images - t.unpriced_images;
+  x.cost += t.allocated_cost;
+  if (t.vins){
+    x.vins += t.vins;
+    x.costWithVins += t.allocated_cost;
+    x.imagesWithVins += t.images;   // numerator must match the VIN denominator
   }
-  const rows = [...m.values()].map(derive)
+  if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
+  if (t.true_accuracy != null && t.acc_images){
+    x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
+  }
+}
+
+/* Each rate divides by its own base — priced images, VIN-covered work, or
+   ARR-covered work. Sharing one denominator would inflate whichever is thinner. */
+const deriveAgg = x => ({...x,
+  ents: x.ents.size, roofs: x.roofs.size,
+  cpi: x.priced ? x.cost/x.priced : null,
+  imagesPerVin: x.vins ? x.imagesWithVins/x.vins : null,
+  costPerVin: x.vins ? x.costWithVins/x.vins : null,
+  costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
+  acc: x.accDen ? x.accNum/x.accDen : null });
+
+const DASH = `<span style="color:var(--steel-light)">—</span>`;
+const accCell = a => a == null ? DASH
+  : `<span class="accbar" style="width:${Math.round(a/2.4)}px"></span>${pct(a)}`;
+
+function segmentTable(teams, T){
+  const pinned = pinSegments(teams);
+  const m = new Map(), all = blankAgg("All segments");
+  for (const t of teams){
+    const k = segOf(pinned, t);
+    if (!m.has(k)) m.set(k, blankAgg(k));
+    addAgg(m.get(k), t); addAgg(all, t);
+  }
+  const rows = [...m.values()].map(deriveAgg)
     .sort((a,b) => segRank(a.key) - segRank(b.key) || b.images - a.images);
   if (!rows.length) return `<div class="segwrap"><span class="status">No segment data</span></div>`;
 
-  const dash = `<span style="color:var(--steel-light)">—</span>`;
-  const line = (r, isTotal) => {
-    const acc = r.acc == null ? dash
-      : `<span class="accbar" style="width:${Math.round(r.acc/2.4)}px"></span>${pct(r.acc)}`;
-    return `<tr><td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
-      <td>${int(r.ents)}</td>
-      <td>${int(r.roofs)}</td>
-      <td>${r.vins ? int(r.vins) : dash}</td>
+  const line = (r, isTotal) => `<tr${isTotal ? "" : ` class="segrow" data-seg="${esc(r.key)}"`}>
+      <td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
+      <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
+      <td>${r.vins ? int(r.vins) : DASH}</td>
       <td>${int(r.images)}</td>
-      <td>${r.imagesPerVin == null ? dash : dec(r.imagesPerVin,1)}</td>
-      <td>${r.cpi == null ? dash : money(r.cpi)}</td>
-      <td>${r.costPerVin == null ? dash : money(r.costPerVin)}</td>
-      <td>${r.costToServe == null ? dash : dec(r.costToServe,1) + "%"}</td>
-      <td>${acc}</td></tr>`;
-  };
+      <td>${r.imagesPerVin == null ? DASH : dec(r.imagesPerVin,1)}</td>
+      <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
+      <td>${r.costPerVin == null ? DASH : money(r.costPerVin)}</td>
+      <td>${r.costToServe == null ? DASH : dec(r.costToServe,1) + "%"}</td>
+      <td>${accCell(r.acc)}</td></tr>`;
+
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
-      <th>Images</th><th>Images / VIN</th><th>Cost / image</th><th>Cost / VIN</th><th>Cost to serve</th>
-      <th>True accuracy</th></tr></thead>
+      <th>Images</th><th>Images / VIN</th><th>Cost / image</th><th>Cost / VIN</th>
+      <th>Cost to serve</th><th>True accuracy</th></tr></thead>
     <tbody>${rows.map(r => line(r, false)).join("")}
-      ${line(derive(all), true)}</tbody>
-  </table></div>`;
+      ${line(deriveAgg(all), true)}</tbody>
+  </table>
+  <div class="seghint">Click a segment to see its rooftops</div></div>`;
+}
+
+/* ==========================================================================
+   Drill-down: one row per rooftop inside a segment
+   ========================================================================== */
+const DRILL_COLS = [
+  ["enterprise",  "Enterprise",    "text"],
+  ["rooftop",     "Rooftop",       "text"],
+  ["vins",        "VINs",          "int"],
+  ["images",      "Images",        "int"],
+  ["imagesPerVin","Images / VIN",  "dec"],
+  ["cost",        "Delivery cost", "money"],
+  ["cpi",         "Cost / image",  "money"],
+  ["costPerVin",  "Cost / VIN",    "money"],
+  ["costToServe", "Cost to serve", "pct"],
+  ["acc",         "True accuracy", "acc"]
+];
+
+function drillRows(segKey){
+  const teams = teamView();
+  const pinned = pinSegments(teams);
+  const scope = segKey === "All segments"
+    ? teams : teams.filter(t => segOf(pinned, t) === segKey);
+  const m = new Map(), all = blankAgg("All rooftops");
+  for (const t of scope){
+    let x = m.get(t.team_id);
+    if (!x) m.set(t.team_id, x = Object.assign(blankAgg(t.team_id),
+      {enterprise:t.enterprise, rooftop:t.team_name}));
+    addAgg(x, t); addAgg(all, t);
+  }
+  return { rows: [...m.values()].map(deriveAgg), total: deriveAgg(all), count: scope.length };
+}
+
+function fmtDrill(r, key, kind){
+  const v = r[key];
+  if (kind === "text")  return esc(v || "—");
+  if (v == null)        return DASH;
+  if (kind === "int")   return v ? int(v) : DASH;
+  if (kind === "dec")   return dec(v, 1);
+  if (kind === "money") return money(v);
+  if (kind === "pct")   return dec(v, 1) + "%";
+  if (kind === "acc")   return accCell(v);
+  return esc(v);
+}
+
+function openDrill(segKey){
+  S.drill = { key: segKey, sortKey: "images", sortDir: -1 };
+  el("drill-find").value = "";
+  renderDrill();
+  el("drill").classList.add("show");
+  el("drill-find").focus();
+}
+function closeDrill(){ el("drill").classList.remove("show"); S.drill = null; }
+
+function renderDrill(){
+  if (!S.drill) return;
+  const { key, sortKey, sortDir } = S.drill;
+  const { rows, total } = drillRows(key);
+  const q = el("drill-find").value.trim().toLowerCase();
+  const shown = q ? rows.filter(r =>
+    (r.rooftop||"").toLowerCase().includes(q) ||
+    (r.enterprise||"").toLowerCase().includes(q)) : rows;
+
+  shown.sort((a,b) => {
+    const av = a[sortKey], bv = b[sortKey];
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * sortDir;
+  });
+
+  el("drill-title").textContent = key;
+  el("drill-sub").textContent =
+    `${int(shown.length)}${q ? " of " + int(rows.length) : ""} rooftops · `
+    + `${int(new Set(rows.map(r => r.enterprise)).size)} enterprises`;
+
+  el("drill-tab").querySelector("thead").innerHTML = "<tr>" + DRILL_COLS.map(([k,l]) =>
+    `<th data-k="${k}" class="${k===sortKey ? "sorted"+(sortDir===1?" asc":"") : ""}">${l}</th>`
+  ).join("") + "</tr>";
+
+  el("drill-tab").querySelector("tbody").innerHTML = shown.length
+    ? shown.map(r => "<tr>" + DRILL_COLS.map(([k,,kind]) =>
+        `<td>${fmtDrill(r, k, kind)}</td>`).join("") + "</tr>").join("")
+    : `<tr><td colspan="${DRILL_COLS.length}" class="drill-empty">No rooftops match that search.</td></tr>`;
+
+  /* The footer totals the rows on screen, so it agrees with what's visible
+     rather than silently reporting the unfiltered segment. */
+  const foot = q ? deriveAgg(shown.reduce((acc, r) => {
+        acc.ents.add(r.enterprise); acc.roofs.add(r.key);
+        acc.images += r.images; acc.priced += r.priced; acc.cost += r.cost;
+        acc.vins += r.vins; acc.costWithVins += r.costWithVins;
+        acc.imagesWithVins += r.imagesWithVins;
+        acc.arrMonth += r.arrMonth; acc.costWithArr += r.costWithArr;
+        acc.accNum += r.accNum; acc.accDen += r.accDen;
+        return acc;
+      }, blankAgg("Matching rooftops"))) : total;
+  el("drill-tab").querySelector("tfoot").innerHTML = "<tr>" + DRILL_COLS.map(([k,,kind]) =>
+    k === "enterprise" ? `<td>${foot.key}</td>`
+    : k === "rooftop"  ? `<td>${int(foot.roofs)} rooftops</td>`
+    : `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
+
+  el("drill-tab").querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
+    const k = th.dataset.k;
+    S.drill.sortDir = S.drill.sortKey === k ? -S.drill.sortDir : -1;
+    S.drill.sortKey = k;
+    renderDrill();
+  }));
 }
 
 function renderCategories(teams, T){
@@ -1473,6 +1655,31 @@ el("btn-csv").addEventListener("click", () => {
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
   a.download = `qc_cost_${S.view}.csv`; a.click();
+});
+
+el("drill-close").addEventListener("click", closeDrill);
+el("drill").addEventListener("click", e => { if (e.target.id === "drill") closeDrill(); });
+addEventListener("keydown", e => { if (e.key === "Escape" && S.drill) closeDrill(); });
+el("drill-find").addEventListener("input", renderDrill);
+
+el("drill-csv").addEventListener("click", () => {
+  if (!S.drill) return;
+  const { rows, total } = drillRows(S.drill.key);
+  const q = el("drill-find").value.trim().toLowerCase();
+  const shown = q ? rows.filter(r => (r.rooftop||"").toLowerCase().includes(q)
+                                  || (r.enterprise||"").toLowerCase().includes(q)) : rows;
+  const num = (r,k) => r[k] == null ? "" : (typeof r[k] === "number" ? +r[k].toFixed(4) : r[k]);
+  const out = [DRILL_COLS.map(c => c[1]),
+    ...shown.map(r => DRILL_COLS.map(([k]) =>
+      k === "enterprise" ? r.enterprise : k === "rooftop" ? r.rooftop : num(r,k))),
+    DRILL_COLS.map(([k]) =>
+      k === "enterprise" ? total.key : k === "rooftop" ? total.roofs : num(total,k))];
+  const csv = out.map(r => r.map(v =>
+    /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v).join(",")).join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], {type:"text/csv"}));
+  a.download = `qc_${S.drill.key.toLowerCase().replace(/[^a-z0-9]+/g,"_")}_rooftops.csv`;
+  a.click();
 });
 
 let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(render, 150); });
