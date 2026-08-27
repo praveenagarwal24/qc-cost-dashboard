@@ -443,7 +443,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v9 · 27 Aug 2026";
+const VERSION = "v10 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -471,6 +471,12 @@ const CONFIG = {
   // Switch to "sku" to use SKU_Count from delivery_working_data instead, which
   // covers every rooftop. Only do that if SKU_Count really is one row per vehicle.
   vinSource: "accuracy",
+
+  // ai_accuracy covers the Images product only. Anything derived from it —
+  // VINs, accuracy, cost per VIN — is therefore an Images-only figure, so the
+  // numerator is restricted to match. Must equal the Product value in
+  // delivery_working_data, matched case-insensitively.
+  accuracyProduct: "Images",
 
   // Who may open the page. This is a courtesy check only — the real gates are
   // the Google test-user list and BigQuery IAM, both enforced server-side.
@@ -619,6 +625,11 @@ team AS (
     SUM(IF(pm.cohort = 'inhouse', w.images, 0))   AS images_inhouse,
     SUM(IF(pm.cohort = 'os',      w.images, 0))   AS images_os,
     SUM(w.sku_count)                              AS sku_count,
+    -- ai_accuracy is Images-only, so VIN rates need an Images-only numerator
+    SUM(IF(LOWER(TRIM(w.Product)) = LOWER('${CONFIG.accuracyProduct}'), w.images, 0))
+                                                  AS images_acc,
+    ROUND(SUM(IF(LOWER(TRIM(w.Product)) = LOWER('${CONFIG.accuracyProduct}'),
+      w.images * IFNULL(pm.rate, 0), 0)), 2)      AS cost_acc,
     SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
     ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost,
     ROUND(SUM(IF(pm.cohort = 'inhouse', w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_inhouse,
@@ -633,6 +644,7 @@ SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
   t.people, t.people_inhouse, t.people_os, t.reviewers,
   t.images, t.images_inhouse, t.images_os, t.unpriced_images, t.sku_count,
+  t.images_acc, t.cost_acc,
   t.allocated_cost, t.cost_inhouse, t.cost_os, t.hours_attributed,
   a.segment, a.poc, a.vins, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
@@ -884,6 +896,7 @@ const normTeam = o => ({
   images:num(o.images)||0,
   images_inhouse:num(o.images_inhouse)||0, images_os:num(o.images_os)||0,
   sku_count:num(o.sku_count)||0,
+  images_acc:num(o.images_acc)||0, cost_acc:num(o.cost_acc)||0,
   unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
   cost_inhouse:num(o.cost_inhouse)||0, cost_os:num(o.cost_os)||0,
@@ -1123,7 +1136,7 @@ function totals(pms, teams, scoped){
   let vins = 0, costWithVins = 0, arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
     const vc = vinsOf(t);
-    if (vc){ vins += vc; costWithVins += t.allocated_cost; }
+    if (vc){ vins += vc; costWithVins += vinBase(t).cost; }
     if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
@@ -1217,7 +1230,9 @@ function renderHero(pms, T, scoped){
     ? `${int(T.pricedImages)} images priced` : "";
   el("hero-cpv").textContent = T.costPerVin == null ? "—" : money(T.costPerVin);
   el("hero-cpv-unit").textContent = T.costPerVin == null
-    ? "no VIN counts in view" : `over ${int(T.vins)} VINs`;
+    ? "no VIN counts in view"
+    : `over ${int(T.vins)} VINs · ${CONFIG.vinSource === "sku"
+        ? "all products" : CONFIG.accuracyProduct + " only"}`;
   renderMonths(T);
 }
 
@@ -1294,7 +1309,8 @@ function renderKpis(T, scoped, teams){
   const unit = [
     ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images", true],
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
-      T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"],
+      T.costPerVin == null ? "needs VIN counts"
+        : (CONFIG.vinSource === "sku" ? "all products" : CONFIG.accuracyProduct + " work only")],
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
       `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
@@ -1353,6 +1369,13 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
 /* ai_accuracy only covers rooftops it has rows for, which is why "No segment"
    shows no VINs. SKU_Count comes from delivery data and covers everything. */
 const vinsOf = t => (CONFIG.vinSource === "sku" ? t.sku_count : t.vins) || 0;
+/* VINs from ai_accuracy count Images work only, so the cost and image totals
+   paired with them must exclude Video and 360 or the rate is inflated by
+   whatever else that rooftop delivered. SKU_Count covers every product, so it
+   pairs with the full totals instead. */
+const vinBase = t => CONFIG.vinSource === "sku"
+  ? { images: t.images,     cost: t.allocated_cost }
+  : { images: t.images_acc, cost: t.cost_acc };
 
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
   cost:0, vins:0, costWithVins:0, imagesWithVins:0,
@@ -1364,9 +1387,10 @@ function addAgg(x, t){
   x.cost += t.allocated_cost;
   const vinCount = vinsOf(t);
   if (vinCount){
+    const b = vinBase(t);
     x.vins += vinCount;
-    x.costWithVins += t.allocated_cost;
-    x.imagesWithVins += t.images;   // numerator must match the VIN denominator
+    x.costWithVins += b.cost;
+    x.imagesWithVins += b.images;
   }
   if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
   if (t.true_accuracy != null && t.acc_images){
@@ -1455,7 +1479,8 @@ function productTable(){
       ${line(allR, true)}</tbody>
   </table>
   <div class="seghint">From delivery_working_data — what was actually delivered, so rows sum to
-    the total · accuracy and VINs aren't reported per product · click a product for its rooftops</div></div>`;
+    the total · ai_accuracy covers ${esc(CONFIG.accuracyProduct)} only, so there is no accuracy
+    or VIN figure for Video and 360 · click a product for its rooftops</div></div>`;
 }
 
 
@@ -1489,7 +1514,9 @@ function segmentTable(teams, T){
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
   </table>
-  <div class="seghint">Click a segment to see its rooftops</div></div>`;
+  <div class="seghint">VINs, cost per VIN and accuracy come from ai_accuracy, which covers
+    ${esc(CONFIG.accuracyProduct)} only — Video and 360 are excluded from those three columns
+    but included in cost per image · click a segment to see its rooftops</div></div>`;
 }
 
 /* ==========================================================================
