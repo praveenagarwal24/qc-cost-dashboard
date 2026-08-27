@@ -6,7 +6,7 @@
 <title>QC Cost, Output &amp; Accuracy — Spyne Delivery Ops</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet"> 
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
   --ink:#10151c; --steel:#5b6878; --steel-light:#8b97a5;
@@ -67,12 +67,12 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .segwrap{padding:12px var(--pad) var(--pad);overflow-x:auto}
 .segtab{width:100%;border-collapse:collapse;font-size:13px}
 .segtab th{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
-  letter-spacing:.1em;text-transform:uppercase;color:var(--steel-light);text-align:right;
+  letter-spacing:.08em;text-transform:uppercase;color:var(--steel-light);text-align:right;
   padding:0 12px 7px;white-space:nowrap;border-bottom:1px solid var(--rule-soft);
   position:static;background:none;cursor:default}
 .segtab th:first-child,.segtab td:first-child{text-align:left;padding-left:0}
 .segtab th:last-child,.segtab td:last-child{padding-right:0}
-.segtab td{padding:9px 12px;text-align:right;white-space:nowrap;
+.segtab td{padding:9px 10px;text-align:right;white-space:nowrap;
   border-bottom:1px solid var(--rule-soft);font-family:"IBM Plex Mono",monospace;
   font-variant-numeric:tabular-nums}
 .segtab td:first-child{font-family:"IBM Plex Sans",sans-serif}
@@ -355,7 +355,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v2 · 27 Aug 2026";
+const VERSION = "v3 · 27 Aug 2026";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -1123,53 +1123,72 @@ function renderKpis(T, scoped, teams){
 /* Customer_Segment comes from ai_accuracy, so a rooftop with no accuracy row has
    no segment either — those land in "No segment" rather than being dropped, or
    the enterprise and rooftop counts here wouldn't reconcile with the tables. */
+/* Customer_Segment comes from ai_accuracy, so a rooftop can carry a segment in
+   one month and none in another. Each rooftop is pinned to its first known
+   segment, otherwise the same rooftop lands in two buckets and the rows stop
+   summing to the total. Cost per VIN and cost to serve are each computed over
+   only the team-months that actually have a VIN count or an ARR row. */
+const SEG_ORDER = ["ent", "mid", "smb", "resellers"];
+const segRank = k => {
+  const i = SEG_ORDER.indexOf(k.toLowerCase());
+  if (i >= 0) return i;
+  return k === "No segment" ? 99 : 50;   // unknown segments sit before No segment
+};
+
 function segmentTable(teams, T){
-  /* A rooftop can have a segment in one month and none in another, since the
-     segment comes from ai_accuracy. Bucketing month by month would then count
-     the same rooftop twice. Each rooftop is pinned to its first known segment
-     so the rows sum to the total. */
   const pinned = new Map();
   for (const t of teams)
     if (t.segment && !pinned.has(t.team_id)) pinned.set(t.team_id, t.segment);
 
-  const m = new Map();
-  for (const t of teams){
-    const k = pinned.get(t.team_id) || "No segment";
-    let x = m.get(k);
-    if (!x) m.set(k, x = {key:k, ents:new Set(), roofs:new Set(),
-      images:0, cost:0, accNum:0, accDen:0});
+  const blank = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
+    cost:0, vins:0, costWithVins:0, arrMonth:0, costWithArr:0, accNum:0, accDen:0});
+  const add = (x, t) => {
     x.ents.add(t.enterprise); x.roofs.add(t.team_id);
-    x.images += t.images; x.cost += t.allocated_cost;
+    x.images += t.images; x.priced += t.images - t.unpriced_images;
+    x.cost += t.allocated_cost;
+    if (t.vins){ x.vins += t.vins; x.costWithVins += t.allocated_cost; }
+    if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
     if (t.true_accuracy != null && t.acc_images){
       x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
     }
+  };
+  const derive = x => ({...x,
+    ents: x.ents.size, roofs: x.roofs.size,
+    cpi: x.priced ? x.cost/x.priced : null,
+    costPerVin: x.vins ? x.costWithVins/x.vins : null,
+    costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
+    acc: x.accDen ? x.accNum/x.accDen : null });
+
+  const m = new Map(), all = blank("All segments");
+  for (const t of teams){
+    const k = pinned.get(t.team_id) || "No segment";
+    if (!m.has(k)) m.set(k, blank(k));
+    add(m.get(k), t); add(all, t);
   }
-  const rows = [...m.values()]
-    .map(x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
-                acc: x.accDen ? x.accNum/x.accDen : null}))
-    .sort((a,b) => b.images - a.images);
+  const rows = [...m.values()].map(derive)
+    .sort((a,b) => segRank(a.key) - segRank(b.key) || b.images - a.images);
   if (!rows.length) return `<div class="segwrap"><span class="status">No segment data</span></div>`;
 
-  const line = (label, ents, roofs, images, acc, isTotal) => {
-    const bar = acc == null ? `<span style="color:var(--steel-light)">—</span>`
-      : `<span class="accbar" style="width:${Math.round(acc/2.4)}px"></span>${pct(acc)}`;
-    return `<tr><td>${isTotal ? label : `<span class="tag">${esc(label)}</span>`}</td>
-      <td>${int(ents)}</td><td>${int(roofs)}</td><td>${int(images)}</td><td>${bar}</td></tr>`;
+  const dash = `<span style="color:var(--steel-light)">—</span>`;
+  const line = (r, isTotal) => {
+    const acc = r.acc == null ? dash
+      : `<span class="accbar" style="width:${Math.round(r.acc/2.4)}px"></span>${pct(r.acc)}`;
+    return `<tr><td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
+      <td>${int(r.ents)}</td>
+      <td>${int(r.roofs)}</td>
+      <td>${r.vins ? int(r.vins) : dash}</td>
+      <td>${int(r.images)}</td>
+      <td>${r.cpi == null ? dash : money(r.cpi)}</td>
+      <td>${r.costPerVin == null ? dash : money(r.costPerVin)}</td>
+      <td>${r.costToServe == null ? dash : dec(r.costToServe,1) + "%"}</td>
+      <td>${acc}</td></tr>`;
   };
-  const allEnts = new Set(), allRoofs = new Set();
-  let allImages = 0, allAccNum = 0, allAccDen = 0;
-  for (const t of teams){
-    allEnts.add(t.enterprise); allRoofs.add(t.team_id); allImages += t.images;
-    if (t.true_accuracy != null && t.acc_images){
-      allAccNum += t.true_accuracy * t.acc_images; allAccDen += t.acc_images;
-    }
-  }
   return `<div class="segwrap"><table class="segtab">
-    <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th>
-      <th>Images</th><th>True accuracy</th></tr></thead>
-    <tbody>${rows.map(r => line(r.key, r.ents, r.roofs, r.images, r.acc, false)).join("")}
-      ${line("All segments", allEnts.size, allRoofs.size, allImages,
-             allAccDen ? allAccNum/allAccDen : null, true)}</tbody>
+    <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
+      <th>Images</th><th>Cost / image</th><th>Cost / VIN</th><th>Cost to serve</th>
+      <th>True accuracy</th></tr></thead>
+    <tbody>${rows.map(r => line(r, false)).join("")}
+      ${line(derive(all), true)}</tbody>
   </table></div>`;
 }
 
