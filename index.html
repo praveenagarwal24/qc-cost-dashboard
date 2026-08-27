@@ -28,6 +28,8 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .topbar{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;margin-bottom:12px}
 .topbar h1{font-size:26px;letter-spacing:-.01em;line-height:1.1}
 .topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
+.ver{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light);
+  background:var(--rule-soft);padding:1px 6px;border-radius:2px}
 .actions{display:flex;gap:8px;align-items:center}
 
 .filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;
@@ -80,10 +82,20 @@ button[disabled]{opacity:.4;cursor:not-allowed}
   vertical-align:middle;margin-right:8px}
 .kpi-label{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
   letter-spacing:.14em;text-transform:uppercase;color:var(--steel-light);
-  padding:10px var(--pad) 0}
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));gap:1px;
-  background:var(--rule-soft);margin-top:10px}
-.kpi{background:var(--card);padding:14px var(--pad)}
+  padding:13px var(--pad) 0}
+.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));margin-top:8px}
+@media(max-width:880px){.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media(max-width:520px){.kpis{grid-template-columns:1fr}}
+.kpi{background:var(--card);padding:13px var(--pad) 15px;
+  border-left:1px solid var(--rule-soft)}
+.kpi:first-child{border-left:none;padding-left:var(--pad)}
+@media(max-width:880px){
+  .kpi:nth-child(odd){border-left:none}
+  .kpi:nth-child(n+3){border-top:1px solid var(--rule-soft)}}
+@media(max-width:520px){
+  .kpi{border-left:none}
+  .kpi:not(:first-child){border-top:1px solid var(--rule-soft)}}
+.kpi.lead .v{font-size:25px}
 .kpi .v{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:21px;
   letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px}
 .kpi .d{font-size:11px;color:var(--steel-light);margin-top:2px}
@@ -253,7 +265,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div>
       <div class="eyebrow">Spyne · Delivery Operations</div>
       <h1>QC Cost, Output &amp; Accuracy</h1>
-      <div class="sub">Salary on email + month · AI accuracy on team + month.</div>
+      <div class="sub">Salary on email + month · AI accuracy on team + month ·
+        <span class="ver" id="ver"></span></div>
     </div>
     <div class="actions">
       <span class="whoami"><span class="em" id="who"></span>
@@ -342,6 +355,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
+const VERSION = "v2 · 27 Aug 2026";
+
 const CONFIG = {
   project : "inspired-frame-453018-r2",
   dataset : "spyne_reviews",
@@ -1062,36 +1077,45 @@ function renderHero(pms, T, scoped){
 function renderKpis(T, scoped, teams){
   const share = (part) => T.cost && part != null
     ? dec(part/T.cost*100) + "% of delivery" : "";
+  const pctOf = part => T.cost && part != null ? dec(part/T.cost*100,1) + "% of delivery" : "";
+
+  // three groups of exactly four, so no row is left half-empty
   const cost = [
-    ["Delivery cost", money(T.cost), "inhouse + OS, allocated"],
+    ["Delivery cost", money(T.cost), "inhouse + OS, allocated", true],
     ["Inhouse cost", money(T.costInhouse),
-      `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${share(T.costInhouse)}`],
-    ["OS cost", money(T.costOs), `outsourced · ${share(T.costOs)}`],
-    ["Total images", int(T.images), "delivered in view"],
-    ["Total VINs", T.vins ? int(T.vins) : "—", "team-months with accuracy"],
-    ["Enterprises", int(T.accounts), "with QC output in view"],
-    ["Rooftops", int(T.rooftops), "teams served"],
-    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
+      `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${pctOf(T.costInhouse)}`],
+    ["OS cost", money(T.costOs),
+      T.costOs ? `outsourced · ${pctOf(T.costOs)}` : "outsourced · no salary rows"],
+    ["Churned cost", money(T.churnedCost),
+      T.churnedCost ? `on churned rooftops · ${pctOf(T.churnedCost)}` : "on churned rooftops"]
+  ];
+  const unit = [
+    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images", true],
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
-      T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"]
-  ];
-  const rev = [
+      T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"],
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
-      `monthly equivalent · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`],
+      `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
-      T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
-    ["ARR coverage", dec(T.arrCoverage,0) + "%", "team-months with an ARR row"],
-    ["Churned cost", T.churnedCost ? money(T.churnedCost) : money(0),
-      "spent on churned rooftops"]
+      T.costRatio == null ? "needs ARR"
+        : `of ARR · over ${dec(T.arrCoverage,0)}% of rooftops`]
   ];
-  const cards = list => list.map(([l,v,d]) =>
-    `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div>
-     <div class="d">${d}</div></div>`).join("");
+  const vol = [
+    ["Total images", int(T.images), "delivered in view", true],
+    ["Total VINs", T.vins ? int(T.vins) : "—", "where accuracy is reported"],
+    ["Enterprises", int(T.accounts), "with QC output"],
+    ["Rooftops", int(T.rooftops), "teams served"]
+  ];
+
+  const cards = list => list.map(([l,v,d,lead]) =>
+    `<div class="kpi${lead ? " lead" : ""}"><div class="eyebrow">${l}</div>
+     <div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
   el("kpis").innerHTML =
-    `<div class="kpi-group"><div class="kpi-label">Cost and volume</div>
+    `<div class="kpi-group"><div class="kpi-label">Cost</div>
        <div class="kpis">${cards(cost)}</div></div>
-     <div class="kpi-group"><div class="kpi-label">Revenue and margin</div>
-       <div class="kpis">${cards(rev)}</div></div>
+     <div class="kpi-group"><div class="kpi-label">Unit economics</div>
+       <div class="kpis">${cards(unit)}</div></div>
+     <div class="kpi-group"><div class="kpi-label">Volume</div>
+       <div class="kpis">${cards(vol)}</div></div>
      <div class="kpi-group"><div class="kpi-label">By customer segment</div>
        ${segmentTable(teams, T)}</div>`;
 }
@@ -1389,6 +1413,7 @@ function afterLoad(source){
   console.log("Loaded from", source, "—", S.daily.length, "daily,", S.teams.length, "team-months");
 }
 
+el("ver").textContent = VERSION;
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
 el("btn-run").addEventListener("click", runQuery);
 ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
