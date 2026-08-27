@@ -62,6 +62,22 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .hero-note{color:var(--steel);font-size:13px;margin-top:8px;max-width:66ch}
 
 .kpi-group{border-top:1px solid var(--rule-soft)}
+.segwrap{padding:12px var(--pad) var(--pad);overflow-x:auto}
+.segtab{width:100%;border-collapse:collapse;font-size:13px}
+.segtab th{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.1em;text-transform:uppercase;color:var(--steel-light);text-align:right;
+  padding:0 12px 7px;white-space:nowrap;border-bottom:1px solid var(--rule-soft);
+  position:static;background:none;cursor:default}
+.segtab th:first-child,.segtab td:first-child{text-align:left;padding-left:0}
+.segtab th:last-child,.segtab td:last-child{padding-right:0}
+.segtab td{padding:9px 12px;text-align:right;white-space:nowrap;
+  border-bottom:1px solid var(--rule-soft);font-family:"IBM Plex Mono",monospace;
+  font-variant-numeric:tabular-nums}
+.segtab td:first-child{font-family:"IBM Plex Sans",sans-serif}
+.segtab tr:last-child td{border-bottom:none;font-weight:500;color:var(--ink)}
+.segtab tr:last-child td:first-child{color:var(--steel)}
+.accbar{display:inline-block;height:5px;border-radius:1px;background:var(--steel-light);
+  vertical-align:middle;margin-right:8px}
 .kpi-label{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
   letter-spacing:.14em;text-transform:uppercase;color:var(--steel-light);
   padding:10px var(--pad) 0}
@@ -996,7 +1012,7 @@ function render(){
   const pms = byPersonMonth(rows), T = totals(pms, teams, scoped);
   markActive(); renderScope(teams, scoped);
   renderHero(pms, T, scoped);
-  renderKpis(T, scoped);
+  renderKpis(T, scoped, teams);
   renderCategories(teams, T);
   renderTrend(rows, teams, T, scoped);
   renderTable(pms, teams, T, scoped);
@@ -1043,7 +1059,7 @@ function renderHero(pms, T, scoped){
     : `Delivery cost across ${int(T.rooftops)} rooftops, every image priced.`;
 }
 
-function renderKpis(T, scoped){
+function renderKpis(T, scoped, teams){
   const share = (part) => T.cost && part != null
     ? dec(part/T.cost*100) + "% of delivery" : "";
   const cost = [
@@ -1053,6 +1069,8 @@ function renderKpis(T, scoped){
     ["OS cost", money(T.costOs), `outsourced · ${share(T.costOs)}`],
     ["Total images", int(T.images), "delivered in view"],
     ["Total VINs", T.vins ? int(T.vins) : "—", "team-months with accuracy"],
+    ["Enterprises", int(T.accounts), "with QC output in view"],
+    ["Rooftops", int(T.rooftops), "teams served"],
     ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"]
@@ -1066,15 +1084,6 @@ function renderKpis(T, scoped){
     ["Churned cost", T.churnedCost ? money(T.churnedCost) : money(0),
       "spent on churned rooftops"]
   ];
-  const ops = [
-    ["True accuracy", pct(T.accuracy), "image-weighted"],
-    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
-  ];
-  ops.push(
-    ["QC people", int(T.heads), `${int(T.headsInhouse)} inhouse · ${int(T.headsOs)} OS`],
-    ["Hours", int(T.hours), scoped ? "attributed by output share" : "distinct working hours"],
-    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"]);
-
   const cards = list => list.map(([l,v,d]) =>
     `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div>
      <div class="d">${d}</div></div>`).join("");
@@ -1083,8 +1092,61 @@ function renderKpis(T, scoped){
        <div class="kpis">${cards(cost)}</div></div>
      <div class="kpi-group"><div class="kpi-label">Revenue and margin</div>
        <div class="kpis">${cards(rev)}</div></div>
-     <div class="kpi-group"><div class="kpi-label">Quality and effort</div>
-       <div class="kpis">${cards(ops)}</div></div>`;
+     <div class="kpi-group"><div class="kpi-label">By customer segment</div>
+       ${segmentTable(teams, T)}</div>`;
+}
+
+/* Customer_Segment comes from ai_accuracy, so a rooftop with no accuracy row has
+   no segment either — those land in "No segment" rather than being dropped, or
+   the enterprise and rooftop counts here wouldn't reconcile with the tables. */
+function segmentTable(teams, T){
+  /* A rooftop can have a segment in one month and none in another, since the
+     segment comes from ai_accuracy. Bucketing month by month would then count
+     the same rooftop twice. Each rooftop is pinned to its first known segment
+     so the rows sum to the total. */
+  const pinned = new Map();
+  for (const t of teams)
+    if (t.segment && !pinned.has(t.team_id)) pinned.set(t.team_id, t.segment);
+
+  const m = new Map();
+  for (const t of teams){
+    const k = pinned.get(t.team_id) || "No segment";
+    let x = m.get(k);
+    if (!x) m.set(k, x = {key:k, ents:new Set(), roofs:new Set(),
+      images:0, cost:0, accNum:0, accDen:0});
+    x.ents.add(t.enterprise); x.roofs.add(t.team_id);
+    x.images += t.images; x.cost += t.allocated_cost;
+    if (t.true_accuracy != null && t.acc_images){
+      x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
+    }
+  }
+  const rows = [...m.values()]
+    .map(x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
+                acc: x.accDen ? x.accNum/x.accDen : null}))
+    .sort((a,b) => b.images - a.images);
+  if (!rows.length) return `<div class="segwrap"><span class="status">No segment data</span></div>`;
+
+  const line = (label, ents, roofs, images, acc, isTotal) => {
+    const bar = acc == null ? `<span style="color:var(--steel-light)">—</span>`
+      : `<span class="accbar" style="width:${Math.round(acc/2.4)}px"></span>${pct(acc)}`;
+    return `<tr><td>${isTotal ? label : `<span class="tag">${esc(label)}</span>`}</td>
+      <td>${int(ents)}</td><td>${int(roofs)}</td><td>${int(images)}</td><td>${bar}</td></tr>`;
+  };
+  const allEnts = new Set(), allRoofs = new Set();
+  let allImages = 0, allAccNum = 0, allAccDen = 0;
+  for (const t of teams){
+    allEnts.add(t.enterprise); allRoofs.add(t.team_id); allImages += t.images;
+    if (t.true_accuracy != null && t.acc_images){
+      allAccNum += t.true_accuracy * t.acc_images; allAccDen += t.acc_images;
+    }
+  }
+  return `<div class="segwrap"><table class="segtab">
+    <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th>
+      <th>Images</th><th>True accuracy</th></tr></thead>
+    <tbody>${rows.map(r => line(r.key, r.ents, r.roofs, r.images, r.acc, false)).join("")}
+      ${line("All segments", allEnts.size, allRoofs.size, allImages,
+             allAccDen ? allAccNum/allAccDen : null, true)}</tbody>
+  </table></div>`;
 }
 
 function renderCategories(teams, T){
