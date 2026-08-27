@@ -60,10 +60,6 @@ button[disabled]{opacity:.4;cursor:not-allowed}
   font-size:clamp(44px,8vw,76px);line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
 .hero-rate .unit{color:var(--steel);font-size:14px;padding-bottom:8px}
 .hero-note{color:var(--steel);font-size:13px;margin-top:8px;max-width:66ch}
-.strip{margin-top:26px}
-.strip-svg{width:100%;height:100px;display:block;overflow:visible}
-.tick rect{transition:opacity .12s}
-.tick:hover rect{opacity:1;stroke:var(--ink);stroke-width:1}
 
 .kpi-group{border-top:1px solid var(--rule-soft)}
 .kpi-label{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
@@ -104,6 +100,7 @@ tbody tr:hover td{background:#f7f9fb}
 .chip{width:8px;height:8px;border-radius:1px;flex:none}
 .tag{font-family:"IBM Plex Mono",monospace;font-size:10px;padding:1px 5px;border-radius:2px;
   background:var(--rule-soft);color:var(--steel)}
+.tag-warn{background:#f7e3e6;color:#9e1b32}
 .bar{display:inline-block;height:5px;border-radius:1px;background:var(--rule);vertical-align:middle;margin-right:7px}
 .scoped{padding:12px var(--pad);color:var(--steel);font-size:13px;
   border-bottom:1px solid var(--rule-soft);background:#f7f9fb}
@@ -260,6 +257,11 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <select id="f-seg"><option value="">All segments</option></select>
     <select id="f-dt"><option value="">All dealer types</option></select>
     <select id="f-poc"><option value="">All POCs</option></select>
+    <span class="div"></span>
+    <span class="lab">Commercial</span>
+    <select id="f-stage"><option value="">All stages</option></select>
+    <select id="f-prod"><option value="">All products</option></select>
+    <select id="f-ver"><option value="">All versions</option></select>
     <input type="text" id="f-ent" list="l-ent" placeholder="Enterprise…" autocomplete="off">
     <datalist id="l-ent"></datalist>
     <input type="text" id="f-roof" list="l-roof" placeholder="Rooftop…" autocomplete="off">
@@ -293,7 +295,6 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
         <div class="unit" id="hero-unit"></div>
       </div>
       <div class="hero-note" id="hero-note"></div>
-      <div class="strip" id="strip-wrap"><svg class="strip-svg" id="strip" role="img" aria-label="Cost per image distribution across QC staff"></svg></div>
     </div>
     <div id="kpis"></div>
   </div>
@@ -320,13 +321,11 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   <div class="panel">
     <div class="panel-head">
       <div class="seg" id="seg">
-        <button data-v="people" class="on">People</button>
-        <button data-v="accounts">Accounts</button>
+        <button data-v="accounts" class="on">Accounts</button>
         <button data-v="teams">Rooftops</button>
       </div>
       <span class="status" id="row-n"></span>
     </div>
-    <div id="table-note"></div>
     <div class="tablewrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 
@@ -347,6 +346,12 @@ const CONFIG = {
   // (outsourced). That's how the Inhouse / OS cost split is derived.
   inhouseDomains: ["spyne.co.in"],
   excludeDomains: ["spyne.ai"],
+
+  // ARR lives in the `arr` table with no currency column. Delivery cost is INR
+  // salary, so the two can only be compared once ARR is converted. Set this to
+  // 1 if Contracted Arr is already INR — the ratios are meaningless otherwise.
+  arrCurrency: "USD",
+  arrToInr: 88,
 
   // Who may open the page. This is a courtesy check only — the real gates are
   // the Google test-user list and BigQuery IAM, both enforced server-side.
@@ -456,6 +461,22 @@ acc AS (
   WHERE Team_ID IS NOT NULL AND TRIM(Team_ID) != ''
   GROUP BY month_key, team_id
 ),
+arr AS (
+  -- 2,728 rows, one or more per team. Collapsed to exactly one before it joins,
+  -- and arr_rows carries the duplicate count so a fan-out risk stays visible.
+  SELECT
+    LOWER(TRIM(\`Team ID\`))          AS team_id,
+    ANY_VALUE(Stage)                  AS stage,
+    MAX(\`Contracted Arr\`)           AS contracted_arr,
+    MAX(\`Live Arr\`)                 AS live_arr,
+    ANY_VALUE(Version)                AS version,
+    ANY_VALUE(ARRAY_TO_STRING(
+      REGEXP_EXTRACT_ALL(Products, r"'([^']+)'"), ', ')) AS products,
+    COUNT(*)                          AS arr_rows
+  FROM \`${CONFIG.project}.${CONFIG.dataset}.arr\`
+  WHERE \`Team ID\` IS NOT NULL AND TRIM(\`Team ID\`) != ''
+  GROUP BY team_id
+),
 team AS (
   SELECT
     w.month_key, w.team_id,
@@ -475,11 +496,14 @@ SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
   t.people, t.images, t.unpriced_images, t.allocated_cost,
   a.segment, a.poc, a.vins, a.acc_images,
-  ROUND(a.true_accuracy, 2) AS true_accuracy
+  ROUND(a.true_accuracy, 2) AS true_accuracy,
+  r.stage, r.contracted_arr, r.live_arr, r.products, r.version, r.arr_rows
 FROM team t
 LEFT JOIN acc a
   ON  a.month_key = t.month_key
   AND a.team_id   = t.team_id
+LEFT JOIN arr r            -- no month column: a snapshot, joined on team alone
+  ON  r.team_id = t.team_id
 ORDER BY t.images DESC
 LIMIT 20000`;
 
@@ -499,7 +523,7 @@ LIMIT 500`;
 /* ==========================================================================
    3. STATE + FORMAT
    ========================================================================== */
-const S = { daily:[], teams:[], excluded:[], view:"people",
+const S = { daily:[], teams:[], excluded:[], view:"accounts",
             sortKey:"cpi", sortDir:-1, token:null };
 
 const money = n => CONFIG.symbol + new Intl.NumberFormat("en-IN",
@@ -688,7 +712,12 @@ const normTeam = o => ({
   segment:o.segment||"", poc:o.poc||"", people:num(o.people)||0,
   images:num(o.images)||0, unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
-  vins:num(o.vins), acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy)
+  vins:num(o.vins), acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
+  stage:o.stage||"", version:o.version||"", products:o.products||"",
+  arr_rows:num(o.arr_rows)||0,
+  contracted_arr:num(o.contracted_arr), live_arr:num(o.live_arr),
+  // one month of contracted ARR, converted so it can sit beside INR salary cost
+  arr_month: num(o.contracted_arr) ? num(o.contracted_arr) * CONFIG.arrToInr / 12 : null
 });
 const normExcl = o => ({
   month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
@@ -775,6 +804,13 @@ function sample(){
       dealer_type:r[4], segment:r[5], poc:r[6], people:2+(ri%4),
       images, unpriced_images: ri===3 ? Math.round(images*0.1) : 0,
       allocated_cost:+(images*rate).toFixed(2),
+      stage: ["Live","Live","Live","Onboarding","Churned"][ri%5],
+      version: ri%3 ? "v2" : "v1",
+      products: [["image","inventory"],["threeSixty","image","inventory"],
+                 ["inventory"],["image","video","advanceTools"]][ri%4].join(", "),
+      arr_rows: 1,
+      contracted_arr: ri===6 ? null : 4800 + ((ri*13)%9)*3600,
+      live_arr: null,
       vins: hasAcc ? 12+((ri*5+mi*3)%46) : null,
       acc_images: hasAcc ? Math.round(images*0.42) : null,
       true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
@@ -795,10 +831,12 @@ function sample(){
 const val = id => el(id).value.trim();
 const F = () => ({
   month: val("f-month"), seg: val("f-seg"), dt: val("f-dt"), poc: val("f-poc"),
+  stage: val("f-stage"), prod: val("f-prod"), ver: val("f-ver"),
   ent: val("f-ent").toLowerCase(), roof: val("f-roof").toLowerCase(),
   q: val("f-search").toLowerCase()
 });
-const accActive = () => { const f = F(); return !!(f.seg || f.dt || f.poc || f.ent || f.roof); };
+const accActive = () => { const f = F();
+  return !!(f.seg || f.dt || f.poc || f.stage || f.prod || f.ver || f.ent || f.roof); };
 
 function dailyView(){
   const f = F();
@@ -812,6 +850,9 @@ function teamView(){
     (!f.seg   || r.segment === f.seg) &&
     (!f.dt    || r.dealer_type === f.dt) &&
     (!f.poc   || r.poc === f.poc) &&
+    (!f.stage || r.stage === f.stage) &&
+    (!f.ver   || r.version === f.ver) &&
+    (!f.prod  || r.products.split(", ").includes(f.prod)) &&
     (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
     (!f.roof  || r.team_name.toLowerCase() === f.roof) &&
     (!f.q     || r.team_name.toLowerCase().includes(f.q)
@@ -833,22 +874,6 @@ function byPersonMonth(rows){
     iph: p.hours ? p.images/p.hours : 0,
     cpi: p.priced && p.images ? p.cost/p.images : null }));
 }
-function byPerson(pms){
-  const m = new Map();
-  for (const p of pms){
-    let x = m.get(p.email);
-    if (!x) m.set(p.email, x = {email:p.email, name:p.name, emp_no:p.emp_no,
-      match_type:p.match_type, cohort:p.cohort,
-      months:0, images:0, hours:0, days:0, cost:0, pricedImages:0});
-    x.months++; x.images += p.images; x.hours += p.hours; x.days += p.days;
-    if (p.cpi != null){ x.cost += p.cost; x.pricedImages += p.images; }
-    if (p.match_type === "email") x.match_type = "email";
-  }
-  return [...m.values()].map(x => ({...x,
-    iph: x.hours ? x.images/x.hours : 0,
-    cpi: x.pricedImages ? x.cost/x.pricedImages : null }));
-}
-
 function weightedAccuracy(rows){
   let n = 0, d = 0;
   for (const r of rows){
@@ -864,7 +889,8 @@ function rollTeams(rows, keyFn, labelFn){
     const k = keyFn(r);
     let x = m.get(k);
     if (!x) m.set(k, x = {key:k, ...labelFn(r), rooftops:new Set(), months:new Set(),
-      people:0, images:0, priced:0, cost:0, accNum:0, accDen:0, vins:0});
+      people:0, images:0, priced:0, cost:0, accNum:0, accDen:0, vins:0,
+      arrMonth:0, costWithArr:0, stages:new Set()});
     x.rooftops.add(r.team_id); x.months.add(r.month_key);
     x.people = Math.max(x.people, r.people);
     x.images += r.images; x.priced += r.images - r.unpriced_images;
@@ -873,11 +899,16 @@ function rollTeams(rows, keyFn, labelFn){
       x.accNum += r.true_accuracy * r.acc_images; x.accDen += r.acc_images;
     }
     if (r.vins) x.vins += r.vins;
+    if (r.stage) x.stages.add(r.stage);
+    if (r.arr_month){ x.arrMonth += r.arr_month; x.costWithArr += r.allocated_cost; }
   }
   return [...m.values()].map(x => ({...x,
     rooftops: x.rooftops.size, months: x.months.size,
     cpi: x.priced ? x.cost/x.priced : null,
-    accuracy: x.accDen ? x.accNum/x.accDen : null }));
+    accuracy: x.accDen ? x.accNum/x.accDen : null,
+    stage: x.stages.size === 1 ? [...x.stages][0] : (x.stages.size ? "Mixed" : ""),
+    arrMonth: x.arrMonth || null,
+    costRatio: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null }));
 }
 
 /* When account filters are on, headline figures come from the team rows so they
@@ -886,12 +917,16 @@ function totals(pms, teams, scoped){
   /* VINs only exist on team-months that have an ai_accuracy row, so cost per VIN
      is computed over that same subset. Dividing all cost by partial VINs would
      inflate the figure by whatever share of work has no accuracy row. */
-  let vins = 0, costWithVins = 0;
+  let vins = 0, costWithVins = 0, arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
-    if (!t.vins) continue;
-    vins += t.vins; costWithVins += t.allocated_cost;
+    if (t.vins){ vins += t.vins; costWithVins += t.allocated_cost; }
+    if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
+    if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
-  const base = { vins, costWithVins,
+  const base = { vins, costWithVins, arrMonth, costWithArr, churnedCost,
+    costRatio: arrMonth ? costWithArr/arrMonth*100 : null,
+    arrCoverage: teams.length
+      ? teams.filter(t => t.arr_month).length / teams.length * 100 : 0,
     costPerVin: vins ? costWithVins/vins : null,
     accuracy: weightedAccuracy(teams),
     accounts: new Set(teams.map(t => t.enterprise)).size,
@@ -939,7 +974,7 @@ function render(){
 }
 
 function markActive(){
-  ["f-month","f-seg","f-dt","f-poc","f-ent","f-roof","f-search"]
+  ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver","f-ent","f-roof","f-search"]
     .forEach(id => el(id).classList.toggle("on", !!val(id)));
 }
 
@@ -951,7 +986,10 @@ function renderScope(teams, scoped){
   if (f.roof) bits.push(`rooftop <b>${esc(val("f-roof"))}</b>`);
   if (f.seg)  bits.push(`segment <b>${esc(f.seg)}</b>`);
   if (f.dt)   bits.push(`dealer type <b>${esc(f.dt)}</b>`);
-  if (f.poc)  bits.push(`POC <b>${esc(f.poc)}</b>`);
+  if (f.poc)   bits.push(`POC <b>${esc(f.poc)}</b>`);
+  if (f.stage) bits.push(`stage <b>${esc(f.stage)}</b>`);
+  if (f.prod)  bits.push(`product <b>${esc(f.prod)}</b>`);
+  if (f.ver)   bits.push(`version <b>${esc(f.ver)}</b>`);
   el("scope-note").innerHTML = `<div class="scoped">Scoped to ${bits.join(", ")} — `
     + `${int(new Set(teams.map(t=>t.team_id)).size)} rooftops, ${int(teams.length)} team-months. `
     + `Hours and per-person figures aren't account-scoped, so they're hidden.</div>`;
@@ -961,42 +999,18 @@ function renderHero(pms, T, scoped){
   el("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
   el("hero-unit").textContent = T.blended
     ? `per image · ${int(T.pricedImages)} images priced` : "";
-  const wrap = el("strip-wrap"), svg = el("strip");
+
   if (scoped){
-    wrap.style.display = "none";
     el("hero-note").textContent =
-      "Cost per image for the selected accounts. The per-person spread is hidden because "
-      + "people work across many rooftops.";
+      "Cost per image for the selected accounts, from delivery cost divided by priced images.";
     return;
   }
-  wrap.style.display = "";
-  const pr = pms.filter(p => p.cpi != null && p.images > 0).sort((a,b) => a.cpi - b.cpi);
-  if (!pr.length){ svg.innerHTML = ""; el("hero-note").textContent = ""; return; }
-
-  const W = svg.clientWidth || 900, H = 100, base = 64;
-  const lo = pr[0].cpi;
-  const hi = pr[Math.min(pr.length-1, Math.floor(pr.length*0.97))].cpi * 1.05;
-  const x = v => 4 + (Math.min(v,hi)-lo)/Math.max(hi-lo,1e-9)*(W-8);
-  const maxImg = Math.max(...pr.map(p => p.images));
-  let s = `<line x1="0" y1="${base}" x2="${W}" y2="${base}" stroke="var(--rule)"/>`;
-  pr.forEach(p => {
-    const h = 10 + (p.images/maxImg)*44;
-    s += `<g class="tick"><title>${esc(p.name)} · ${p.month_key}\n${money(p.cpi)} per image · `
-       + `${int(p.images)} images · ${money(p.salary||0)} salary</title>`
-       + `<rect x="${x(p.cpi)-1.5}" y="${base-h}" width="3" height="${h}" rx="1" `
-       + `fill="${costColor(p.cpi/T.blended)}" opacity=".78"/></g>`;
-  });
-  const ax = x(T.blended);
-  s += `<line x1="${ax}" y1="6" x2="${ax}" y2="${base+8}" stroke="var(--ink)" stroke-dasharray="2 3"/>`
-     + `<text x="${ax}" y="${base+26}" text-anchor="${ax>W-70?"end":"middle"}" font-family="IBM Plex Mono" font-size="10" fill="var(--ink)">avg ${money(T.blended)}</text>`
-     + `<text x="0" y="${base+26}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(lo)}</text>`
-     + `<text x="${W}" y="${base+26}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(hi)}</text>`;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = s;
-
-  const spread = pr[pr.length-1].cpi / pr[0].cpi, top = pr[pr.length-1];
-  el("hero-note").textContent =
-    `${pr.length} person-months priced. Costliest image runs ${dec(spread)}× the cheapest `
-    + `(${top.name}, ${top.month_key}, ${money(top.cpi)}). Hover any tick.`;
+  const unpriced = T.images - T.pricedImages;
+  const gap = T.images ? unpriced / T.images * 100 : 0;
+  el("hero-note").textContent = unpriced > 0
+    ? `Delivery cost across ${int(T.rooftops)} rooftops. ${int(unpriced)} images `
+      + `(${dec(gap)}%) have no salary match, so the true rate is a little higher.`
+    : `Delivery cost across ${int(T.rooftops)} rooftops, every image priced.`;
 }
 
 function renderKpis(T, scoped){
@@ -1015,21 +1029,23 @@ function renderKpis(T, scoped){
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"]
   ];
-  const ops = [
-    ["True accuracy", pct(T.accuracy), "image-weighted"],
-    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
+  const rev = [
+    ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
+      `monthly equivalent · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`],
+    ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
+      T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
+    ["ARR coverage", dec(T.arrCoverage,0) + "%", "team-months with an ARR row"],
+    ["Churned cost", T.churnedCost ? money(T.churnedCost) : money(0),
+      "spent on churned rooftops"]
   ];
-  if (!scoped) ops.push(
-    ["QC people", int(T.heads), `${int(T.headsInhouse)} inhouse · ${int(T.headsOs)} OS`],
-    ["Hours", int(T.hours), "distinct working hours"],
-    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"]);
-
   const cards = list => list.map(([l,v,d]) =>
     `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div>
      <div class="d">${d}</div></div>`).join("");
   el("kpis").innerHTML =
     `<div class="kpi-group"><div class="kpi-label">Cost and volume</div>
        <div class="kpis">${cards(cost)}</div></div>
+     <div class="kpi-group"><div class="kpi-label">Revenue and margin</div>
+       <div class="kpis">${cards(rev)}</div></div>
      <div class="kpi-group"><div class="kpi-label">Quality and effort</div>
        <div class="kpis">${cards(ops)}</div></div>`;
 }
@@ -1153,23 +1169,17 @@ function renderTrend(rows, teams, T, scoped){
 }
 
 const COLS = {
-  people: [["name","Person"],["match_type","Match"],["months","Mo"],["days","Days"],
-    ["images","Images"],["hours","Hours"],["iph","Img/hr"],["cost","Allocated cost"],["cpi","Cost/image"]],
-  accounts:[["label","Enterprise"],["rooftops","Rooftops"],["people","QC people"],
-    ["images","Images"],["vins","VINs"],["cost","Allocated cost"],["accuracy","Accuracy"],["cpi","Cost/image"]],
-  teams:   [["label","Rooftop"],["sub","Enterprise"],["segment","Segment"],["dealer_type","Type"],
-    ["images","Images"],["vins","VINs"],["cost","Allocated cost"],["accuracy","Accuracy"],["cpi","Cost/image"]]
+  accounts:[["label","Enterprise"],["stage","Stage"],["rooftops","Rooftops"],
+    ["images","Images"],["vins","VINs"],["arrMonth","ARR / mo"],["cost","Delivery cost"],
+    ["costRatio","Cost of ARR"],["accuracy","Accuracy"],["cpi","Cost/image"]],
+  teams:   [["label","Rooftop"],["sub","Enterprise"],["stage","Stage"],["segment","Segment"],
+    ["images","Images"],["vins","VINs"],["arrMonth","ARR / mo"],["cost","Delivery cost"],
+    ["costRatio","Cost of ARR"],["accuracy","Accuracy"],["cpi","Cost/image"]]
 };
 
 function renderTable(pms, teams, T, scoped){
   const v = S.view;
-  el("table-note").innerHTML = (v === "people" && scoped)
-    ? `<div class="scoped">Account filters don't apply to people — a QC reviewer works across many
-       rooftops, so their salary can't be split by enterprise. Switch to Accounts or Rooftops for
-       filtered figures.</div>` : "";
-
   let data;
-  if (v === "people")   data = F().month ? pms.map(p => ({...p, months:1})) : byPerson(pms);
   if (v === "accounts") data = rollTeams(teams, r => r.enterprise, r => ({label:r.enterprise}));
   if (v === "teams")    data = rollTeams(teams, r => r.team_id,
     r => ({label:r.team_name, sub:r.enterprise, segment:r.segment, dealer_type:r.dealer_type}));
@@ -1182,8 +1192,7 @@ function renderTable(pms, teams, T, scoped){
     if (bv == null) return -1;
     return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * S.sortDir;
   });
-  el("row-n").textContent =
-    `${int(data.length)} ${v === "people" ? "people" : v === "accounts" ? "enterprises" : "rooftops"}`;
+  el("row-n").textContent = `${int(data.length)} ${v === "accounts" ? "enterprises" : "rooftops"}`;
 
   document.querySelector("#tbl thead").innerHTML = "<tr>" + cols.map(([k,l]) =>
     `<th data-k="${k}" class="${k===S.sortKey?"sorted":""}">${l}</th>`).join("") + "</tr>";
@@ -1194,31 +1203,30 @@ function renderTable(pms, teams, T, scoped){
       : `<span class="cpi-cell"><span class="chip" style="background:${c}"></span>${money(r.cpi)}</span>`;
     const acc = r.accuracy == null ? `<span style="color:var(--steel-light)">no data</span>`
       : `<span class="bar" style="width:${Math.round(r.accuracy/2.2)}px"></span>${pct(r.accuracy)}`;
-    if (v === "people"){
-      const tag = r.match_type === "email" ? "matched" : "no salary row";
-      return `<tr>
-        <td><div class="who"><span>${esc(r.name)}${r.emp_no?` <span class="tag">${esc(r.emp_no)}</span>`:""}</span>
-        <span class="m num">${esc(r.email)}</span></div></td>
-        <td style="text-align:left"><span class="tag">${tag}</span></td>
-        <td class="num">${r.months}</td><td class="num">${r.days}</td>
-        <td class="num">${int(r.images)}</td><td class="num">${int(r.hours)}</td>
-        <td class="num">${dec(r.iph)}</td>
-        <td class="num">${r.cost ? money(r.cost) : "—"}</td><td class="num">${cpi}</td></tr>`;
-    }
+    const stage = !r.stage ? `<span style="color:var(--steel-light)">—</span>`
+      : `<span class="tag${r.stage==="Churned"?" tag-warn":""}">${esc(r.stage)}</span>`;
+    const arr = r.arrMonth == null ? `<span style="color:var(--steel-light)">—</span>` : money(r.arrMonth);
+    const ratio = r.costRatio == null ? `<span style="color:var(--steel-light)">—</span>`
+      : `<span style="color:${r.costRatio > 100 ? "var(--cost-high)" : "inherit"}">${dec(r.costRatio,1)}%</span>`;
     if (v === "accounts"){
       return `<tr><td>${esc(r.label)}</td>
-        <td class="num">${int(r.rooftops)}</td><td class="num">${int(r.people)}</td>
+        <td style="text-align:left">${stage}</td>
+        <td class="num">${int(r.rooftops)}</td>
         <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
+        <td class="num">${arr}</td>
         <td class="num">${r.cost?money(r.cost):"—"}</td>
+        <td class="num">${ratio}</td>
         <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
     }
     return `<tr>
       <td><div class="who"><span>${esc(r.label)}</span><span class="m num">${esc(r.key)}</span></div></td>
       <td style="text-align:left;color:var(--steel)">${esc(r.sub||"—")}</td>
+      <td style="text-align:left">${stage}</td>
       <td style="text-align:left">${r.segment?`<span class="tag">${esc(r.segment)}</span>`:"—"}</td>
-      <td style="text-align:left;color:var(--steel)">${esc(r.dealer_type||"—")}</td>
       <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
+      <td class="num">${arr}</td>
       <td class="num">${r.cost?money(r.cost):"—"}</td>
+      <td class="num">${ratio}</td>
       <td class="num">${acc}</td><td class="num">${cpi}</td></tr>`;
   }).join("");
 
@@ -1270,6 +1278,24 @@ function coverage(){
       though their cost still counts. UNKNOWN_TEAM means a blank Team_id, which can never join.
       <ul><li>${roofs.slice(0,15).map(esc).join("</li><li>")}${roofs.length>15?`</li><li>+${roofs.length-15} more`:""}</li></ul></div>`);
   }
+  const noArr = S.teams.filter(t => !t.contracted_arr);
+  if (noArr.length){
+    const roofs = [...new Set(noArr.map(t => t.team_name))];
+    chips.push(`${dec(noArr.length/Math.max(1,S.teams.length)*100,0)}% team-months without ARR`);
+    items.push(`<div class="cov-item"><b>${noArr.length} team-months have no contracted ARR.</b>
+      Cost of ARR and the revenue cards are computed only over the rooftops that do have one, so
+      they describe a narrower slice than Delivery cost. ARR is read as
+      ${CONFIG.arrCurrency} and converted at ${CONFIG.arrToInr} — change arrToInr in CONFIG if
+      that's wrong, because every ratio here depends on it.
+      <ul><li>${roofs.slice(0,15).map(esc).join("</li><li>")}${roofs.length>15?`</li><li>+${roofs.length-15} more`:""}</li></ul></div>`);
+  }
+  const dupes = S.teams.filter(t => t.arr_rows > 1);
+  if (dupes.length){
+    chips.push(`${new Set(dupes.map(t=>t.team_id)).size} teams duplicated in arr`);
+    items.push(`<div class="cov-item"><b>${new Set(dupes.map(t=>t.team_id)).size} team IDs appear
+      more than once in the arr table.</b> They're collapsed with MAX before joining, so nothing
+      fans out, but the ARR shown is the largest row rather than a sum.</div>`);
+  }
   if (S.excluded.length){
     const who = [...new Set(S.excluded.map(e => e.email))];
     const imgs = S.excluded.reduce((a,e) => a + e.images, 0);
@@ -1292,6 +1318,10 @@ function afterLoad(source){
   fillOptions("f-seg", [...new Set(S.teams.map(t=>t.segment))].filter(Boolean).sort(), "All segments");
   fillOptions("f-dt",  [...new Set(S.teams.map(t=>t.dealer_type))].filter(Boolean).sort(), "All dealer types");
   fillOptions("f-poc", [...new Set(S.teams.map(t=>t.poc))].filter(Boolean).sort(), "All POCs");
+  fillOptions("f-stage", [...new Set(S.teams.map(t=>t.stage))].filter(Boolean).sort(), "All stages");
+  fillOptions("f-ver", [...new Set(S.teams.map(t=>t.version))].filter(Boolean).sort(), "All versions");
+  fillOptions("f-prod", [...new Set(S.teams.flatMap(t =>
+    t.products ? t.products.split(", ") : []))].filter(Boolean).sort(), "All products");
   el("l-ent").innerHTML = [...new Set(S.teams.map(t=>t.enterprise))].sort()
     .map(e => `<option value="${esc(e)}">`).join("");
   fillRooftops();
@@ -1303,11 +1333,13 @@ function afterLoad(source){
 
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
 el("btn-run").addEventListener("click", runQuery);
-["f-month","f-seg","f-dt","f-poc"].forEach(id => el(id).addEventListener("change", render));
+["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
+  .forEach(id => el(id).addEventListener("change", render));
 el("f-ent").addEventListener("input", () => { el("f-roof").value = ""; fillRooftops(); render(); });
 ["f-roof","f-search"].forEach(id => el(id).addEventListener("input", render));
 el("btn-clear").addEventListener("click", () => {
-  ["f-month","f-seg","f-dt","f-poc","f-ent","f-roof","f-search"].forEach(id => el(id).value = "");
+  ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver","f-ent","f-roof","f-search"]
+    .forEach(id => el(id).value = "");
   fillRooftops(); render();
 });
 
@@ -1319,20 +1351,14 @@ document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click"
 }));
 
 el("btn-csv").addEventListener("click", () => {
-  const pms = byPersonMonth(dailyView()), teams = teamView();
-  let rows;
-  if (S.view === "people"){
-    rows = [["email","name","employee_number","match","months","days","images","hours","images_per_hour","allocated_cost","cost_per_image"],
-      ...(F().month ? pms.map(p=>({...p,months:1})) : byPerson(pms)).map(p =>
-        [p.email,p.name,p.emp_no,p.match_type,p.months,p.days,p.images,p.hours.toFixed(0),
-         p.iph.toFixed(2),p.cost.toFixed(2),p.cpi==null?"":p.cpi.toFixed(4)])];
-  }else{
-    rows = [["month","team_id","rooftop","enterprise","segment","poc","dealer_type","qc_people","images","unpriced_images","vins","accuracy_images","true_accuracy","allocated_cost","cost_per_image"],
-      ...teams.map(t => [t.month_key,t.team_id,t.team_name,t.enterprise,t.segment,t.poc,t.dealer_type,
-        t.people,t.images,t.unpriced_images,t.vins??"",t.acc_images??"",t.true_accuracy??"",
-        t.allocated_cost.toFixed(2),
-        (t.images-t.unpriced_images) ? (t.allocated_cost/(t.images-t.unpriced_images)).toFixed(4) : ""])];
-  }
+  const teams = teamView();
+  const rows = [["month","team_id","rooftop","enterprise","segment","poc","dealer_type",
+    "qc_people","images","unpriced_images","vins","accuracy_images","true_accuracy",
+    "allocated_cost","cost_per_image"],
+    ...teams.map(t => [t.month_key,t.team_id,t.team_name,t.enterprise,t.segment,t.poc,t.dealer_type,
+      t.people,t.images,t.unpriced_images,t.vins??"",t.acc_images??"",t.true_accuracy??"",
+      t.allocated_cost.toFixed(2),
+      (t.images-t.unpriced_images) ? (t.allocated_cost/(t.images-t.unpriced_images)).toFixed(4) : ""])];
   const csv = rows.map(r => r.map(v =>
     /[",\n]/.test(String(v)) ? `"${String(v).replace(/"/g,'""')}"` : v).join(",")).join("\n");
   const a = document.createElement("a");
