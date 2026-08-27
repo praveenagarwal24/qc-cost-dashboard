@@ -56,12 +56,16 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .panel-head h2{font-size:13px;letter-spacing:.02em}
 .panel-body{padding:var(--pad)}
 
-.hero{padding:24px var(--pad) 20px}
-.hero-rate{display:flex;align-items:flex-end;gap:14px;flex-wrap:wrap}
-.hero-rate .big{font-family:"IBM Plex Mono",monospace;font-weight:600;
-  font-size:clamp(44px,8vw,76px);line-height:.9;letter-spacing:-.03em;font-variant-numeric:tabular-nums}
-.hero-rate .unit{color:var(--steel);font-size:14px;padding-bottom:8px}
-.hero-note{color:var(--steel);font-size:13px;margin-top:8px;max-width:66ch}
+.hero{padding:22px var(--pad) 20px;display:flex;gap:34px;
+  align-items:flex-start;justify-content:space-between;flex-wrap:wrap}
+.hero-stats{display:flex;gap:40px;flex-wrap:wrap}
+.hero-stat .big{font-family:"IBM Plex Mono",monospace;font-weight:600;
+  font-size:clamp(34px,5.2vw,56px);line-height:1;letter-spacing:-.03em;
+  font-variant-numeric:tabular-nums;margin-top:5px}
+.hero-stat .unit{color:var(--steel-light);font-size:12px;margin-top:5px}
+.hero-trend{flex:1 1 340px;min-width:300px;max-width:620px}
+#chart-months{width:100%;display:block;overflow:visible;margin-top:6px}
+@media(max-width:760px){.hero{gap:22px}.hero-stats{gap:28px}}
 
 .kpi-group{border-top:1px solid var(--rule-soft)}
 .segwrap{padding:12px var(--pad) var(--pad);overflow-x:auto}
@@ -378,12 +382,22 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   <div class="panel hero-panel">
     <div id="scope-note"></div>
     <div class="hero">
-      <div class="eyebrow">Blended cost per image</div>
-      <div class="hero-rate">
-        <div class="big" id="hero-cpi">—</div>
-        <div class="unit" id="hero-unit"></div>
+      <div class="hero-stats">
+        <div class="hero-stat">
+          <div class="eyebrow">Blended cost per image</div>
+          <div class="big" id="hero-cpi">—</div>
+          <div class="unit" id="hero-unit"></div>
+        </div>
+        <div class="hero-stat">
+          <div class="eyebrow">Cost per VIN</div>
+          <div class="big" id="hero-cpv">—</div>
+          <div class="unit" id="hero-cpv-unit"></div>
+        </div>
       </div>
-      <div class="hero-note" id="hero-note"></div>
+      <div class="hero-trend">
+        <div class="eyebrow" id="months-label">Cost per image by month</div>
+        <svg id="chart-months" role="img" aria-label="Cost per image by month"></svg>
+      </div>
     </div>
     <div id="kpis"></div>
   </div>
@@ -405,7 +419,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v6 · 27 Aug 2026";
+const VERSION = "v7 · 27 Aug 2026";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -1113,20 +1127,66 @@ function renderScope(teams, scoped){
 function renderHero(pms, T, scoped){
   el("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
   el("hero-unit").textContent = T.blended
-    ? `per image · ${int(T.pricedImages)} images priced` : "";
+    ? `${int(T.pricedImages)} images priced` : "";
+  el("hero-cpv").textContent = T.costPerVin == null ? "—" : money(T.costPerVin);
+  el("hero-cpv-unit").textContent = T.costPerVin == null
+    ? "no VIN counts in view" : `over ${int(T.vins)} VINs`;
+  renderMonths(T);
+}
 
-  if (scoped){
-    el("hero-note").textContent =
-      "Only reviewers who logged work on the selected accounts are counted, and only "
-      + "the share of their month spent on those accounts.";
-    return;
+/* Deliberately ignores the month filter — the point of this chart is the
+   trajectory across every month you have, so picking one month shows where it
+   sits rather than collapsing to a single bar. Account filters still apply. */
+function renderMonths(T){
+  const svg = el("chart-months");
+  const f = F();
+  const scope = S.teams.filter(r =>
+    (!f.seg   || r.segment === f.seg) &&
+    (!f.dt    || r.dealer_type === f.dt) &&
+    (!f.poc   || r.poc === f.poc) &&
+    (!f.stage || r.stage === f.stage) &&
+    (!f.ver   || r.version === f.ver) &&
+    (!f.prod  || r.products.split(", ").includes(f.prod)) &&
+    (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
+    (!f.roof  || r.team_name.toLowerCase() === f.roof));
+
+  const m = new Map();
+  for (const t of scope){
+    const d = m.get(t.month_key) || {key:t.month_key, images:0, priced:0, cost:0};
+    d.images += t.images; d.priced += t.images - t.unpriced_images;
+    d.cost += t.allocated_cost;
+    m.set(t.month_key, d);
   }
-  const unpriced = T.images - T.pricedImages;
-  const gap = T.images ? unpriced / T.images * 100 : 0;
-  el("hero-note").textContent = unpriced > 0
-    ? `Delivery cost across ${int(T.rooftops)} rooftops. ${int(unpriced)} images `
-      + `(${dec(gap)}%) have no salary match, so the true rate is a little higher.`
-    : `Delivery cost across ${int(T.rooftops)} rooftops, every image priced.`;
+  const pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key))
+    .map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+
+  el("months-label").textContent = pts.length
+    ? `Cost per image by month · ${pts.length} months` : "Cost per image by month";
+  if (!pts.length){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+
+  const W = svg.clientWidth || 560, H = 132, padT = 20, padB = 30;
+  const plotH = H - padT - padB;
+  const max = Math.max(...pts.map(d => d.cpi)) * 1.18 || 1;
+  const step = W / pts.length, bw = Math.min(46, step - 10);
+  const cx = i => i*step + step/2;
+  const sel = f.month;
+
+  const bars = pts.map((d,i) => {
+    const hgt = Math.max(2, d.cpi/max*plotH);
+    const on = !sel || sel === d.key;
+    return `<g><title>${d.key} · ${money(d.cpi)} per image · ${int(d.images)} images</title>`
+      + `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="2" `
+      + `fill="${costColor(d.cpi/(T.blended||1))}" opacity="${on ? .9 : .22}"/>`
+      + `<text x="${cx(i)}" y="${padT+plotH-hgt-6}" text-anchor="middle" `
+      + `font-family="IBM Plex Mono" font-size="11" font-weight="500" `
+      + `fill="${on ? "var(--ink)" : "var(--steel-light)"}">${money(d.cpi)}</text>`
+      + `<text x="${cx(i)}" y="${H-10}" text-anchor="middle" font-family="IBM Plex Mono" `
+      + `font-size="10" fill="var(--steel-light)">${d.key.slice(2)}</text></g>`;
+  }).join("");
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+  svg.setAttribute("height", H);
+  svg.innerHTML = `<line x1="0" y1="${padT+plotH}" x2="${W}" y2="${padT+plotH}" stroke="var(--rule)"/>` + bars;
 }
 
 function renderKpis(T, scoped, teams){
@@ -1472,8 +1532,8 @@ function renderTrend(rows, teams, T, scoped){
     : "";
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
-  const W = svg.clientWidth || 1160, H = 330;
-  const padL = 54, padR = 52, padT = 16, padB = 34;
+  const W = svg.clientWidth || 1160, H = 350;
+  const padL = 54, padR = 52, padT = 26, padB = 34;
   const pw = W-padL-padR, plotH = H-padT-padB;
   const maxImg = Math.max(...pts.map(d => d.images)) || 1;
   const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.2) || 1;
@@ -1481,25 +1541,54 @@ function renderTrend(rows, teams, T, scoped){
   const cx = i => padL + i*step + step/2;
   const cy = v => padT + plotH - v/maxCpi*plotH;
 
-  let s = "";
+  const lo = Math.min(...pts.map(d => d.cpi)), hi = Math.max(...pts.map(d => d.cpi));
+  const loI = pts.findIndex(d => d.cpi === lo), hiI = pts.findIndex(d => d.cpi === hi);
+
+  let s = `<defs>
+    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="${costColor(hi/(T.blended||1))}" stop-opacity=".26"/>
+      <stop offset="100%" stop-color="${costColor(lo/(T.blended||1))}" stop-opacity=".02"/>
+    </linearGradient>
+  </defs>`;
+
   for (let i=0; i<=4; i++){
     const y = padT + plotH*i/4;
     s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
        + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(maxImg*(1-i/4))}</text>`
        + `<text x="${W-padR+8}" y="${y+3}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi*(1-i/4))}</text>`;
   }
+
   s += pts.map((d,i) => {
     const hgt = d.images/maxImg*plotH;
-    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="1" `
-      + `fill="${costColor(d.cpi/(T.blended||1))}" opacity=".62"/>`;
+    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="1.5" `
+      + `fill="${costColor(d.cpi/(T.blended||1))}" opacity=".55"/>`;
   }).join("");
+
+  // filled area under the rate line, tinted by where the rate sits on the ramp
+  s += `<path d="M${cx(0)},${padT+plotH} `
+     + pts.map((d,i) => `L${cx(i)},${cy(d.cpi)}`).join(" ")
+     + ` L${cx(pts.length-1)},${padT+plotH} Z" fill="url(#areaGrad)"/>`;
+
   s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" `
-     + `stroke="var(--ink)" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/>`;
+     + `stroke="var(--ink)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
   s += pts.map((d,i) =>
-    `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.6" fill="var(--card)" `
+    `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="${i===loI||i===hiI ? 4 : 2.6}" `
+    + `fill="${i===loI||i===hiI ? costColor(d.cpi/(T.blended||1)) : "var(--card)"}" `
     + `stroke="var(--ink)" stroke-width="1.4"/>`).join("");
 
-  // full-height hit areas so the whole column is clickable, not just the bar
+  /* Label every point when there is room, otherwise thin them out and always
+     keep the highest and lowest, since those are the days worth asking about. */
+  const gap = Math.max(1, Math.ceil(pts.length / Math.max(4, Math.floor(pw/62))));
+  s += pts.map((d,i) => {
+    const keep = i === loI || i === hiI || i % gap === 0 || i === pts.length-1;
+    if (!keep) return "";
+    const strong = i === loI || i === hiI;
+    return `<text x="${cx(i)}" y="${cy(d.cpi) - (strong ? 11 : 9)}" text-anchor="middle" `
+      + `font-family="IBM Plex Mono" font-size="${strong ? 11 : 10}" `
+      + `font-weight="${strong ? 600 : 400}" `
+      + `fill="${strong ? costColor(d.cpi/(T.blended||1)) : "var(--steel)"}">${money(d.cpi)}</text>`;
+  }).join("");
+
   s += pts.map((d,i) =>
     `<g class="${grain === "day" ? "trendhit" : "trendhit nolink"}" data-date="${d.date}">`
     + `<title>${d.date}\n${int(d.images)} images · ${money(d.cpi)} per image`
