@@ -12,7 +12,6 @@
   --ink:#10151c; --steel:#5b6878; --steel-light:#8b97a5;
   --paper:#eef1f5; --card:#fff; --rule:#dbe1e9; --rule-soft:#eaeef3;
   --cost-low:#0e7c66; --cost-mid:#5b6878; --cost-high:#9e1b32;
-  --warn-bg:#fdf4e7; --warn-ink:#8a5a11; --warn-rule:#e8d3ac;
   --pad:20px; --radius:3px;
 }
 *{box-sizing:border-box}
@@ -26,17 +25,26 @@ body{background:var(--paper);color:var(--ink);
 h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .wrap{max-width:1240px;margin:0 auto;padding:24px 20px 64px}
 
-.topbar{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:18px}
+.topbar{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;margin-bottom:12px}
 .topbar h1{font-size:26px;letter-spacing:-.01em;line-height:1.1}
 .topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
-.controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.actions{display:flex;gap:8px;align-items:center}
+
+.filterbar{display:flex;flex-wrap:wrap;gap:7px;align-items:center;
+  background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);
+  padding:10px var(--pad);margin-bottom:14px}
+.filterbar .lab{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.12em;text-transform:uppercase;color:var(--steel-light);margin-right:2px}
+.filterbar .div{width:1px;height:20px;background:var(--rule);margin:0 5px}
 select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--card);
-  border:1px solid var(--rule);border-radius:var(--radius);padding:7px 9px}
+  border:1px solid var(--rule);border-radius:var(--radius);padding:6px 8px;max-width:210px}
 select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:1px}
+select.on,input.on{border-color:var(--ink);background:#f4f7fa}
 button{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:12px;
   letter-spacing:.06em;text-transform:uppercase;background:var(--ink);color:#fff;
   border:1px solid var(--ink);border-radius:var(--radius);padding:8px 14px;cursor:pointer}
 button.ghost{background:transparent;color:var(--ink)}
+button.tiny{padding:6px 10px;font-size:11px}
 button:hover{opacity:.85}
 button[disabled]{opacity:.4;cursor:not-allowed}
 
@@ -92,12 +100,26 @@ tbody tr:hover td{background:#f7f9fb}
 .tag{font-family:"IBM Plex Mono",monospace;font-size:10px;padding:1px 5px;border-radius:2px;
   background:var(--rule-soft);color:var(--steel)}
 .bar{display:inline-block;height:5px;border-radius:1px;background:var(--rule);vertical-align:middle;margin-right:7px}
+.scoped{padding:12px var(--pad);color:var(--steel);font-size:13px;
+  border-bottom:1px solid var(--rule-soft);background:#f7f9fb}
 
-.banner{border:1px solid var(--warn-rule);background:var(--warn-bg);color:var(--warn-ink);
+.alert{border:1px solid var(--rule);background:var(--card);color:var(--ink);
   padding:11px var(--pad);border-radius:var(--radius);margin-bottom:14px;font-size:13px}
-.banner b{font-weight:500}
-.banner ul{margin:6px 0 0;padding-left:18px}
+.alert b{font-weight:500}
 .status{font-size:12px;color:var(--steel);font-family:"IBM Plex Mono",monospace}
+
+details.cov{margin:-6px 0 14px}
+details.cov summary{cursor:pointer;list-style:none;font-size:12px;color:var(--steel-light);
+  font-family:"IBM Plex Mono",monospace;padding:2px 0}
+details.cov summary::-webkit-details-marker{display:none}
+details.cov summary:hover{color:var(--steel)}
+.cov-body{background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);
+  padding:14px var(--pad);margin-top:7px;font-size:13px;color:var(--steel)}
+.cov-item{margin-bottom:11px}
+.cov-item:last-child{margin-bottom:0}
+.cov-item b{color:var(--ink);font-weight:500}
+.cov-item ul{margin:4px 0 0;padding-left:18px;columns:3;column-gap:24px;font-size:12px}
+@media(max-width:800px){.cov-item ul{columns:1}}
 
 details.sql{margin-bottom:14px}
 details.sql summary{cursor:pointer;list-style:none;padding:10px var(--pad);background:var(--card);
@@ -111,7 +133,7 @@ details.sql[open] summary{border-radius:var(--radius) var(--radius) 0 0;color:va
 .sqlbox .eyebrow{padding:12px 0 6px}
 textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-size:12px;
   line-height:1.6;color:var(--ink);background:#fbfcfd;border:1px solid var(--rule);
-  border-radius:var(--radius);padding:12px;resize:vertical}
+  border-radius:var(--radius);padding:12px;resize:vertical;max-width:none}
 
 .rise{animation:rise .5s cubic-bezier(.2,.7,.3,1) both}
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
@@ -127,16 +149,31 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <h1>QC Cost, Output &amp; Accuracy</h1>
       <div class="sub">Salary on email + month · AI accuracy on team + month.</div>
     </div>
-    <div class="controls">
-      <select id="f-month"><option value="">All months</option></select>
-      <select id="f-seg"><option value="">All segments</option></select>
-      <input type="text" id="f-search" placeholder="Find…" style="width:140px">
+    <div class="actions">
       <button class="ghost" id="btn-csv">Export CSV</button>
       <button id="btn-run">Run query</button>
     </div>
   </div>
 
-  <div id="banners"></div>
+  <div class="filterbar">
+    <span class="lab">Period</span>
+    <select id="f-month"><option value="">All months</option></select>
+    <span class="div"></span>
+    <span class="lab">Account</span>
+    <select id="f-seg"><option value="">All segments</option></select>
+    <select id="f-dt"><option value="">All dealer types</option></select>
+    <select id="f-poc"><option value="">All POCs</option></select>
+    <input type="text" id="f-ent" list="l-ent" placeholder="Enterprise…" autocomplete="off">
+    <datalist id="l-ent"></datalist>
+    <input type="text" id="f-roof" list="l-roof" placeholder="Rooftop…" autocomplete="off">
+    <datalist id="l-roof"></datalist>
+    <span class="div"></span>
+    <input type="text" id="f-search" placeholder="Find in table…" style="width:150px">
+    <button class="ghost tiny" id="btn-clear">Clear</button>
+  </div>
+
+  <div id="alerts"></div>
+  <div id="coverage"></div>
 
   <details class="sql">
     <summary>SQL — three queries, run together</summary>
@@ -151,14 +188,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   </details>
 
   <div class="panel hero-panel">
+    <div id="scope-note"></div>
     <div class="hero">
       <div class="eyebrow">Blended cost per image</div>
       <div class="hero-rate">
         <div class="big" id="hero-cpi">—</div>
         <div class="unit" id="hero-unit"></div>
       </div>
-      <div class="hero-note" id="hero-note">Each tick is one QC person in one month, placed on the cost axis. Bar height is image volume.</div>
-      <div class="strip"><svg class="strip-svg" id="strip" role="img" aria-label="Cost per image distribution across QC staff"></svg></div>
+      <div class="hero-note" id="hero-note"></div>
+      <div class="strip" id="strip-wrap"><svg class="strip-svg" id="strip" role="img" aria-label="Cost per image distribution across QC staff"></svg></div>
     </div>
     <div class="kpis" id="kpis"></div>
   </div>
@@ -173,11 +211,11 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 
   <div class="grid2">
     <div class="panel">
-      <div class="panel-head"><h2>Accuracy by image category</h2><span class="status" id="cat-n"></span></div>
+      <div class="panel-head"><h2>Cost and accuracy by dealer type</h2><span class="status" id="cat-n"></span></div>
       <div class="panel-body"><svg class="chart" id="chart-cat"></svg></div>
     </div>
     <div class="panel">
-      <div class="panel-head"><h2>Daily output and rate</h2><span class="status">bars = images · line = cost/image</span></div>
+      <div class="panel-head"><h2 id="trend-title">Daily output and rate</h2><span class="status" id="trend-n">bars = images · line = cost/image</span></div>
       <div class="panel-body"><svg class="chart" id="chart-trend"></svg></div>
     </div>
   </div>
@@ -191,6 +229,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       </div>
       <span class="status" id="row-n"></span>
     </div>
+    <div id="table-note"></div>
     <div class="tablewrap"><table id="tbl"><thead></thead><tbody></tbody></table></div>
   </div>
 
@@ -204,18 +243,14 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 const CONFIG = {
   project : "inspired-frame-453018-r2",
   dataset : "spyne_reviews",
-  clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",              // OAuth client ID (Web application) from GCP
+  clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",
   symbol  : "\u20B9",
   qcDomains: ["spyne.co.in"],
-  jsonFallback: "data.json"  // {daily, teams, categories, excluded}
+  jsonFallback: "data.json"
 };
 
 /* ==========================================================================
    2. SQL
-   Two independent month keys, because the two tables spell months differently:
-     salary_sheet  "Jul'26"      -> %b'%y
-     ai_accuracy   "1 Apr, 2026" -> %e %b, %Y
-   Both normalise to YYYY-MM before anything joins.
    ========================================================================== */
 const QC_DOMAINS = CONFIG.qcDomains
   .map(d => `LOWER(TRIM(QC)) LIKE '%@${d.replace(/^@/, "")}'`).join("\n         OR ");
@@ -299,19 +334,13 @@ FROM daily d
 JOIN pm ON pm.qc_email = d.qc_email AND pm.month_key = d.month_key
 ORDER BY d.work_date DESC, d.images DESC`;
 
-/* ai_accuracy is 4 rows per team-month (one per Image_Category), so it MUST be
-   collapsed to one row per team-month before it touches anything. Two traps:
-     - true_accuracy is a percentage. Rolling it up needs a Total_Images weight,
-       not AVG, or a 4-image category counts as much as a 900-image one.
-     - VINs repeats the same figure across categories (38/38/38/20 in the
-       preview). SUM would multiply it. MAX is the honest read. */
 const SQL_B = SHARED + `,
 acc AS (
   SELECT
     ${ACC_MONTH}                                                       AS month_key,
     LOWER(TRIM(Team_ID))                                               AS team_id,
     ANY_VALUE(Customer_Segment)                                        AS segment,
-    ANY_VALUE(Enterprise_Name)                                         AS acc_enterprise,
+    ANY_VALUE(POC)                                                     AS poc,
     MAX(VINs)                                                          AS vins,
     SUM(Total_Images)                                                  AS acc_images,
     SAFE_DIVIDE(SUM(true_accuracy * Total_Images), SUM(Total_Images))  AS true_accuracy
@@ -321,8 +350,7 @@ acc AS (
 ),
 team AS (
   SELECT
-    w.month_key,
-    w.team_id,
+    w.month_key, w.team_id,
     ANY_VALUE(w.Enterprise)     AS enterprise,
     ANY_VALUE(w.enterprise_id)  AS enterprise_id,
     ANY_VALUE(w.Team_Name)      AS team_name,
@@ -338,14 +366,14 @@ team AS (
 SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
   t.people, t.images, t.unpriced_images, t.allocated_cost,
-  a.segment, a.vins, a.acc_images,
+  a.segment, a.poc, a.vins, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy
 FROM team t
-LEFT JOIN acc a           -- LEFT: a rooftop with no accuracy row still shows its cost
+LEFT JOIN acc a
   ON  a.month_key = t.month_key
   AND a.team_id   = t.team_id
 ORDER BY t.images DESC
-LIMIT 8000`;
+LIMIT 20000`;
 
 const SQL_C = `
 SELECT
@@ -372,6 +400,7 @@ const int  = n => new Intl.NumberFormat("en-IN").format(Math.round(n));
 const dec  = (n,d=1) => Number(n).toFixed(d);
 const pct  = n => n == null ? "—" : dec(n,1) + "%";
 const esc  = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
+const el   = id => document.getElementById(id);
 
 function costColor(ratio){
   const stops = [[.55,[14,124,102]],[1,[91,104,120]],[1.9,[158,27,50]]];
@@ -381,17 +410,15 @@ function costColor(ratio){
   const t = (r - lo[0]) / (hi[0] - lo[0]);
   return "rgb(" + lo[1].map((v,i) => Math.round(v + (hi[1][i]-v)*t)).join(",") + ")";
 }
-const banner = html => document.getElementById("banners")
-  .insertAdjacentHTML("beforeend", `<div class="banner">${html}</div>`);
-const clearBanners = () => document.getElementById("banners").innerHTML = "";
+const alert_ = html => el("alerts").insertAdjacentHTML("beforeend", `<div class="alert">${html}</div>`);
+const clearAlerts = () => { el("alerts").innerHTML = ""; el("coverage").innerHTML = ""; };
 
 /* ==========================================================================
    4. DATA IN
    ========================================================================== */
 function getToken(){
   return new Promise((resolve, reject) => {
-    if (!CONFIG.clientId) return reject(new Error(
-      "No OAuth client ID set. Add one to CONFIG.clientId near the top of this file."));
+    if (!CONFIG.clientId) return reject(new Error("No OAuth client ID set in CONFIG.clientId."));
     if (!window.google?.accounts?.oauth2) return reject(new Error(
       "Google sign-in hasn't loaded yet. Wait a moment and try again."));
     google.accounts.oauth2.initTokenClient({
@@ -416,20 +443,17 @@ async function bq(sql){
 }
 
 async function runQuery(){
-  const btn = document.getElementById("btn-run");
-  btn.disabled = true; btn.textContent = "Running…"; clearBanners();
+  const btn = el("btn-run");
+  btn.disabled = true; btn.textContent = "Running…"; clearAlerts();
   try{
     if (!S.token) S.token = await getToken();
     const [a,b,c] = await Promise.all([
-      bq(document.getElementById("sql-a").value),
-      bq(document.getElementById("sql-b").value),
-      bq(document.getElementById("sql-c").value)
-    ]);
+      bq(el("sql-a").value), bq(el("sql-b").value), bq(el("sql-c").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam); S.excluded = c.map(normExcl);
     afterLoad("BigQuery");
   }catch(e){
     S.token = null;
-    banner(`<b>Query didn't run.</b> ${esc(e.message)}`);
+    alert_(`<b>Query didn't run.</b> ${esc(e.message)}`);
   }finally{ btn.disabled = false; btn.textContent = "Run query"; }
 }
 
@@ -447,11 +471,10 @@ const normTeam = o => ({
   month_key:o.month_key||"", team_id:(o.team_id||"").toLowerCase(),
   team_name:o.team_name||"—", enterprise:o.enterprise||"—",
   enterprise_id:o.enterprise_id||"", dealer_type:o.dealer_type||"UNKNOWN",
-  segment:o.segment||"", people:num(o.people)||0,
+  segment:o.segment||"", poc:o.poc||"", people:num(o.people)||0,
   images:num(o.images)||0, unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
-  vins:num(o.vins), acc_images:num(o.acc_images),
-  true_accuracy:num(o.true_accuracy)
+  vins:num(o.vins), acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy)
 });
 const normExcl = o => ({
   month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
@@ -482,24 +505,22 @@ function sample(){
     ["Chhotu Singh","chhotu.singh@spyne.co.in","E6650"],["Pradeep Singh","pradeep.singh@spyne.co.in","E6661"],
     ["Rambha Prajapati","rambha.prajapati@spyne.co.in","E6670"],["Kavi Singh","kavi.singh@spyne.co.in","E6682"],
     ["Samir Ansari","samir.ansari@spyne.co.in","E6690"],["Lalit Shukla","lalit.shukla@spyne.co.in","E6701"],
-    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],
-    ["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"]
+    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"]
   ];
   const roofs = [
-    ["Bentley Tampa Bay","11df1566a","dimmitt automotive","9dd9791eb","FRANCHISE","Ent"],
-    ["Gaye Chevrolet","d9eebfaf14","Gaye Chevrolet","0b37725f8","FRANCHISE","SMB"],
-    ["Dellenbach","43b96ab81","Dellenbach Motors","914365f63","FRANCHISE","Ent"],
-    ["4season Motors Llc","f586ec34ab","4 Season Motors LLC","e89409525","INDEPENDENT","SMB"],
-    ["4M Autoplex","8c0048630f","4M Autoplex","bafd919bb","OTHERS","SMB"],
-    ["ASK Motors","8dec940d38","ASK Motors","6671ea5b6","INDEPENDENT","SMB"],
-    ["AX Auto INC","cfe0d77a59","AX Auto INC","2b8948cea","INDEPENDENT","SMB"],
-    ["Al Piemonte Buick GMC","133218a6aa","Al Piemonte","ec7fa01a5","OTHERS","Ent"],
-    ["Adams Chevrolet","397eeed15","Adams Chevrolet Inc","442e5dc24","FRANCHISE","Ent"],
-    ["615 Auto Sales","6eb794982","615 Auto Sales INC","a3a20bdb2","INDEPENDENT","SMB"]
+    ["Bentley Tampa Bay","11df1566a","dimmitt automotive","9dd9791eb","FRANCHISE","Ent","Unassigned"],
+    ["Gaye Chevrolet","d9eebfaf14","Gaye Chevrolet","0b37725f8","FRANCHISE","SMB","Unassigned"],
+    ["Dellenbach","43b96ab81","Dellenbach Motors","914365f63","FRANCHISE","Ent","Unassigned"],
+    ["4season Motors Llc","f586ec34ab","4 Season Motors LLC","e89409525","INDEPENDENT","SMB","Unassigned"],
+    ["4M Autoplex","8c0048630f","4M Autoplex","bafd919bb","OTHERS","SMB","Unassigned"],
+    ["ASK Motors","8dec940d38","ASK Motors","6671ea5b6","INDEPENDENT","SMB","Unassigned"],
+    ["AX Auto INC","cfe0d77a59","AX Auto INC","2b8948cea","INDEPENDENT","SMB","Unassigned"],
+    ["Al Piemonte Buick GMC","133218a6aa","Al Piemonte","ec7fa01a5","OTHERS","Ent","Unassigned"],
+    ["Adams Chevrolet","397eeed15","Adams Chevrolet Inc","442e5dc24","FRANCHISE","Ent","Unassigned"],
+    ["615 Auto Sales","6eb794982","615 Auto Sales INC","a3a20bdb2","INDEPENDENT","SMB","Unassigned"]
   ];
   const months = ["2026-04","2026-05","2026-06","2026-07"];
   const daily = [], teams = [];
-
   people.forEach((p,pi) => {
     const speed = 0.6 + ((pi*29)%100)/100 * 0.95;
     months.forEach((mk,mi) => {
@@ -525,20 +546,18 @@ function sample(){
       }));
     });
   });
-
   const pmRate = {};
   daily.forEach(d => { if (d.allocated_cost != null)
     pmRate[d.email+"|"+d.month_key] = d.allocated_cost / d.images; });
   const rates = Object.values(pmRate);
   const avgRate = rates.reduce((a,b)=>a+b,0) / rates.length;
-
   roofs.forEach((r,ri) => months.forEach((mk,mi) => {
     const images = 2400 + ((ri*7+mi*13)%9)*900;
     const rate = avgRate * (0.72 + ((ri*31+mi*17)%100)/100 * 0.85);
-    const hasAcc = !(ri === 7 && mi > 1);        // one rooftop missing accuracy
+    const hasAcc = !(ri === 7 && mi > 1);
     teams.push({
       month_key:mk, team_id:r[1], team_name:r[0], enterprise:r[2], enterprise_id:r[3],
-      dealer_type:r[4], segment:r[5], people:2+(ri%4),
+      dealer_type:r[4], segment:r[5], poc:r[6], people:2+(ri%4),
       images, unpriced_images: ri===3 ? Math.round(images*0.1) : 0,
       allocated_cost:+(images*rate).toFixed(2),
       vins: hasAcc ? 12+((ri*5+mi*3)%46) : null,
@@ -546,30 +565,42 @@ function sample(){
       true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
     });
   }));
-
   const excluded = [];
   ["raj.tripathi@spyne.ai","rafil.khan@spyne.ai","lalit.shukla@spyne.ai"].forEach((e,i) =>
     months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
-
   return {daily, teams, excluded};
 }
 
 /* ==========================================================================
-   5. AGGREGATE
+   5. FILTERS
+   Month + free-text apply everywhere. Segment / dealer type / POC / enterprise
+   / rooftop exist only in the team query, so they scope the account-level
+   views. When one is on, the page says so instead of quietly mixing scopes.
    ========================================================================== */
-const mFilter = () => document.getElementById("f-month").value;
-const sFilter = () => document.getElementById("f-seg").value;
-const qFilter = () => document.getElementById("f-search").value.trim().toLowerCase();
+const val = id => el(id).value.trim();
+const F = () => ({
+  month: val("f-month"), seg: val("f-seg"), dt: val("f-dt"), poc: val("f-poc"),
+  ent: val("f-ent").toLowerCase(), roof: val("f-roof").toLowerCase(),
+  q: val("f-search").toLowerCase()
+});
+const accActive = () => { const f = F(); return !!(f.seg || f.dt || f.poc || f.ent || f.roof); };
 
 function dailyView(){
-  const m = mFilter(), q = qFilter();
-  return S.daily.filter(r => (!m || r.month_key === m) &&
-    (!q || r.name.toLowerCase().includes(q) || r.email.includes(q)));
+  const f = F();
+  return S.daily.filter(r => (!f.month || r.month_key === f.month) &&
+    (!f.q || r.name.toLowerCase().includes(f.q) || r.email.includes(f.q)));
 }
 function teamView(){
-  const m = mFilter(), sg = sFilter(), q = qFilter();
-  return S.teams.filter(r => (!m || r.month_key === m) && (!sg || r.segment === sg) &&
-    (!q || r.team_name.toLowerCase().includes(q) || r.enterprise.toLowerCase().includes(q)));
+  const f = F();
+  return S.teams.filter(r =>
+    (!f.month || r.month_key === f.month) &&
+    (!f.seg   || r.segment === f.seg) &&
+    (!f.dt    || r.dealer_type === f.dt) &&
+    (!f.poc   || r.poc === f.poc) &&
+    (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
+    (!f.roof  || r.team_name.toLowerCase() === f.roof) &&
+    (!f.q     || r.team_name.toLowerCase().includes(f.q)
+              || r.enterprise.toLowerCase().includes(f.q)));
 }
 
 function byPersonMonth(rows){
@@ -602,14 +633,13 @@ function byPerson(pms){
     cpi: x.pricedImages ? x.cost/x.pricedImages : null }));
 }
 
-/* accuracy is a rate — always weight by the image count it was measured over */
 function weightedAccuracy(rows){
-  let num = 0, den = 0;
+  let n = 0, d = 0;
   for (const r of rows){
     if (r.true_accuracy == null || !r.acc_images) continue;
-    num += r.true_accuracy * r.acc_images; den += r.acc_images;
+    n += r.true_accuracy * r.acc_images; d += r.acc_images;
   }
-  return den ? num/den : null;
+  return d ? n/d : null;
 }
 
 function rollTeams(rows, keyFn, labelFn){
@@ -618,11 +648,11 @@ function rollTeams(rows, keyFn, labelFn){
     const k = keyFn(r);
     let x = m.get(k);
     if (!x) m.set(k, x = {key:k, ...labelFn(r), rooftops:new Set(), months:new Set(),
-      people:0, images:0, priced:0, cost:0, accNum:0, accDen:0, vins:0, rows:0});
+      people:0, images:0, priced:0, cost:0, accNum:0, accDen:0, vins:0});
     x.rooftops.add(r.team_id); x.months.add(r.month_key);
     x.people = Math.max(x.people, r.people);
     x.images += r.images; x.priced += r.images - r.unpriced_images;
-    x.cost += r.allocated_cost; x.rows++;
+    x.cost += r.allocated_cost;
     if (r.true_accuracy != null && r.acc_images){
       x.accNum += r.true_accuracy * r.acc_images; x.accDen += r.acc_images;
     }
@@ -634,48 +664,86 @@ function rollTeams(rows, keyFn, labelFn){
     accuracy: x.accDen ? x.accNum/x.accDen : null }));
 }
 
-function totals(pms, teams){
-  const cost = pms.reduce((a,p) => a + p.cost, 0);
-  const pricedImages = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
-  return { cost, pricedImages,
-    images: pms.reduce((a,p) => a + p.images, 0),
-    hours : pms.reduce((a,p) => a + p.hours, 0),
-    heads : new Set(pms.map(p => p.email)).size,
+/* When account filters are on, headline figures come from the team rows so they
+   actually reflect the filter. Hours only exist per person, so they drop out. */
+function totals(pms, teams, scoped){
+  const accuracy = weightedAccuracy(teams);
+  const base = { accuracy,
     accounts: new Set(teams.map(t => t.enterprise)).size,
     rooftops: new Set(teams.map(t => t.team_id)).size,
-    vins: teams.reduce((a,t) => a + (t.vins||0), 0),
-    accuracy: weightedAccuracy(teams),
-    blended: pricedImages ? cost/pricedImages : 0 };
+    vins: teams.reduce((a,t) => a + (t.vins||0), 0) };
+  if (scoped){
+    const cost = teams.reduce((a,t) => a + t.allocated_cost, 0);
+    const priced = teams.reduce((a,t) => a + (t.images - t.unpriced_images), 0);
+    return {...base, cost, pricedImages:priced,
+      images: teams.reduce((a,t) => a + t.images, 0),
+      hours: null, heads: null, blended: priced ? cost/priced : 0 };
+  }
+  const cost = pms.reduce((a,p) => a + p.cost, 0);
+  const priced = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
+  return {...base, cost, pricedImages:priced,
+    images: pms.reduce((a,p) => a + p.images, 0),
+    hours: pms.reduce((a,p) => a + p.hours, 0),
+    heads: new Set(pms.map(p => p.email)).size,
+    blended: priced ? cost/priced : 0 };
 }
 
 /* ==========================================================================
    6. RENDER
    ========================================================================== */
 function render(){
+  const scoped = accActive();
   const rows = dailyView(), teams = teamView();
-  const pms = byPersonMonth(rows), T = totals(pms, teams);
-  renderHero(pms, T);
-  renderKpis(T);
+  const pms = byPersonMonth(rows), T = totals(pms, teams, scoped);
+  markActive(); renderScope(teams, scoped);
+  renderHero(pms, T, scoped);
+  renderKpis(T, scoped);
   renderScatter(teams, T);
   renderCategories(teams, T);
-  renderTrend(rows, T);
-  renderTable(pms, teams, T);
+  renderTrend(rows, teams, T, scoped);
+  renderTable(pms, teams, T, scoped);
 }
 
-function renderHero(pms, T){
-  document.getElementById("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
-  document.getElementById("hero-unit").textContent = T.blended
+function markActive(){
+  ["f-month","f-seg","f-dt","f-poc","f-ent","f-roof","f-search"]
+    .forEach(id => el(id).classList.toggle("on", !!val(id)));
+}
+
+function renderScope(teams, scoped){
+  if (!scoped){ el("scope-note").innerHTML = ""; return; }
+  const f = F();
+  const bits = [];
+  if (f.ent)  bits.push(`enterprise <b>${esc(val("f-ent"))}</b>`);
+  if (f.roof) bits.push(`rooftop <b>${esc(val("f-roof"))}</b>`);
+  if (f.seg)  bits.push(`segment <b>${esc(f.seg)}</b>`);
+  if (f.dt)   bits.push(`dealer type <b>${esc(f.dt)}</b>`);
+  if (f.poc)  bits.push(`POC <b>${esc(f.poc)}</b>`);
+  el("scope-note").innerHTML = `<div class="scoped">Scoped to ${bits.join(", ")} — `
+    + `${int(new Set(teams.map(t=>t.team_id)).size)} rooftops, ${int(teams.length)} team-months. `
+    + `Hours and per-person figures aren't account-scoped, so they're hidden.</div>`;
+}
+
+function renderHero(pms, T, scoped){
+  el("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
+  el("hero-unit").textContent = T.blended
     ? `per image · ${int(T.pricedImages)} images priced` : "";
-  const svg = document.getElementById("strip");
+  const wrap = el("strip-wrap"), svg = el("strip");
+  if (scoped){
+    wrap.style.display = "none";
+    el("hero-note").textContent =
+      "Cost per image for the selected accounts. The per-person spread is hidden because "
+      + "people work across many rooftops.";
+    return;
+  }
+  wrap.style.display = "";
   const pr = pms.filter(p => p.cpi != null && p.images > 0).sort((a,b) => a.cpi - b.cpi);
-  if (!pr.length){ svg.innerHTML = ""; return; }
+  if (!pr.length){ svg.innerHTML = ""; el("hero-note").textContent = ""; return; }
 
   const W = svg.clientWidth || 900, H = 100, base = 64;
   const lo = pr[0].cpi;
   const hi = pr[Math.min(pr.length-1, Math.floor(pr.length*0.97))].cpi * 1.05;
   const x = v => 4 + (Math.min(v,hi)-lo)/Math.max(hi-lo,1e-9)*(W-8);
   const maxImg = Math.max(...pr.map(p => p.images));
-
   let s = `<line x1="0" y1="${base}" x2="${W}" y2="${base}" stroke="var(--rule)"/>`;
   pr.forEach(p => {
     const h = 10 + (p.images/maxImg)*44;
@@ -692,34 +760,32 @@ function renderHero(pms, T){
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.innerHTML = s;
 
   const spread = pr[pr.length-1].cpi / pr[0].cpi, top = pr[pr.length-1];
-  document.getElementById("hero-note").textContent =
+  el("hero-note").textContent =
     `${pr.length} person-months priced. Costliest image runs ${dec(spread)}× the cheapest `
     + `(${top.name}, ${top.month_key}, ${money(top.cpi)}). Hover any tick.`;
 }
 
-function renderKpis(T){
+function renderKpis(T, scoped){
   const items = [
     ["Images", int(T.images), "in view"],
     ["Allocated cost", money(T.cost), "salary spread over output"],
     ["True accuracy", pct(T.accuracy), "image-weighted"],
+    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`],
+    ["VINs", T.vins ? int(T.vins) : "—", "from ai_accuracy"]
+  ];
+  if (!scoped) items.push(
     ["Hours", int(T.hours), "distinct working hours"],
     ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"],
-    ["Cost / hour", T.hours ? money(T.cost/T.hours) : "—", "allocated"],
-    ["QC people", int(T.heads), "with output"],
-    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
-  ];
-  document.getElementById("kpis").innerHTML = items.map(([l,v,d]) =>
+    ["QC people", int(T.heads), "with output"]);
+  el("kpis").innerHTML = items.map(([l,v,d]) =>
     `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
 }
 
-/* the point of the whole join: cost on one axis, quality on the other */
 function renderScatter(teams, T){
-  const svg = document.getElementById("chart-scatter");
-  const pts = teams.filter(t => t.true_accuracy != null && t.images > 0 &&
-                                t.images > t.unpriced_images)
+  const svg = el("chart-scatter");
+  const pts = teams.filter(t => t.true_accuracy != null && t.images > t.unpriced_images)
                    .map(t => ({...t, cpi: t.allocated_cost/(t.images - t.unpriced_images)}));
-  document.getElementById("sc-n").textContent =
-    `${pts.length} of ${teams.length} team-months have an accuracy row`;
+  el("sc-n").textContent = `${pts.length} of ${teams.length} team-months have an accuracy row`;
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
   const W = svg.clientWidth || 1180, H = 380, padL = 54, padR = 16, padT = 16, padB = 40;
@@ -727,11 +793,11 @@ function renderScatter(teams, T){
   const accs = pts.map(p => p.true_accuracy).sort((a,b)=>a-b);
   const cpis = pts.map(p => p.cpi).sort((a,b)=>a-b);
   const xLo = Math.max(0, Math.floor(accs[0]/5)*5 - 2), xHi = 100;
-  const yHi = cpis[Math.floor(cpis.length*0.97)] * 1.12;
-  const X = v => padL + (v-xLo)/(xHi-xLo)*pw;
+  const yHi = cpis[Math.floor(cpis.length*0.97)] * 1.12 || 1;
+  const X = v => padL + (v-xLo)/Math.max(xHi-xLo,1e-9)*pw;
   const Y = v => padT + ph - Math.min(v,yHi)/yHi*ph;
   const maxImg = Math.max(...pts.map(p => p.images));
-  const midAcc = weightedAccuracy(pts), midCpi = T.blended;
+  const midAcc = weightedAccuracy(pts) ?? 90, midCpi = T.blended;
 
   let s = "";
   for (let i=0; i<=4; i++){
@@ -739,13 +805,11 @@ function renderScatter(teams, T){
     s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
        + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(yHi*(1-i/4))}</text>`;
   }
-  for (let a=Math.ceil(xLo/10)*10; a<=100; a+=10){
+  for (let a=Math.ceil(xLo/10)*10; a<=100; a+=10)
     s += `<text x="${X(a)}" y="${H-14}" text-anchor="middle" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${a}%</text>`;
-  }
   s += `<line x1="${X(midAcc)}" y1="${padT}" x2="${X(midAcc)}" y2="${padT+ph}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
      + `<line x1="${padL}" y1="${Y(midCpi)}" x2="${W-padR}" y2="${Y(midCpi)}" stroke="var(--ink)" stroke-dasharray="2 3" opacity=".5"/>`
      + `<text x="${padL+8}" y="${padT+14}" font-family="IBM Plex Sans Condensed" font-weight="700" font-size="10" letter-spacing=".1em" fill="var(--cost-high)">COSTLY AND INACCURATE</text>`;
-
   s += pts.sort((a,b) => b.images - a.images).map(p => {
     const r = 3 + Math.sqrt(p.images/maxImg)*13;
     return `<g class="dot"><title>${esc(p.team_name)} · ${p.month_key}\n${esc(p.enterprise)}`
@@ -754,17 +818,15 @@ function renderScatter(teams, T){
       + `<circle cx="${X(p.true_accuracy)}" cy="${Y(p.cpi)}" r="${r}" `
       + `fill="${costColor(p.cpi/(T.blended||1))}" opacity=".5"/></g>`;
   }).join("");
-
   s += `<text x="${W-padR}" y="${H-14}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">true accuracy →</text>`;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
-  svg.innerHTML = s;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.innerHTML = s;
 }
 
 function renderCategories(teams, T){
-  const svg = document.getElementById("chart-cat");
+  const svg = el("chart-cat");
   const rows = rollTeams(teams, r => r.dealer_type, r => ({label:r.dealer_type}))
     .filter(r => r.priced > 0).sort((a,b) => b.cpi - a.cpi);
-  document.getElementById("cat-n").textContent = rows.length ? `${rows.length} dealer types` : "";
+  el("cat-n").textContent = rows.length ? `${rows.length} dealer types` : "";
   if (!rows.length){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
   const W = svg.clientWidth || 460, rowH = 52, H = rows.length*rowH + 8;
@@ -785,39 +847,56 @@ function renderCategories(teams, T){
   }).join("");
 }
 
-function renderTrend(rows, T){
-  const svg = document.getElementById("chart-trend");
-  const m = new Map();
-  for (const r of rows){
-    const d = m.get(r.work_date) || {date:r.work_date, images:0, cost:0, priced:0};
-    d.images += r.images;
-    if (r.allocated_cost != null){ d.cost += r.allocated_cost; d.priced += r.images; }
-    m.set(r.work_date, d);
+/* daily when unscoped; monthly from team rows when scoped, so the chart
+   actually respects the account filter instead of showing everything */
+function renderTrend(rows, teams, T, scoped){
+  const svg = el("chart-trend");
+  let pts;
+  if (scoped){
+    el("trend-title").textContent = "Monthly output and rate";
+    el("trend-n").textContent = "bars = images · line = cost/image";
+    const m = new Map();
+    for (const t of teams){
+      const d = m.get(t.month_key) || {date:t.month_key, images:0, cost:0, priced:0};
+      d.images += t.images; d.cost += t.allocated_cost;
+      d.priced += t.images - t.unpriced_images;
+      m.set(t.month_key, d);
+    }
+    pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
+  }else{
+    el("trend-title").textContent = "Daily output and rate";
+    el("trend-n").textContent = "bars = images · line = cost/image";
+    const m = new Map();
+    for (const r of rows){
+      const d = m.get(r.work_date) || {date:r.work_date, images:0, cost:0, priced:0};
+      d.images += r.images;
+      if (r.allocated_cost != null){ d.cost += r.allocated_cost; d.priced += r.images; }
+      m.set(r.work_date, d);
+    }
+    pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
   }
-  const days = [...m.values()].sort((a,b) => a.date.localeCompare(b.date))
-    .map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
-  if (days.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+  pts = pts.map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+  if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
   const W = svg.clientWidth || 620, H = 248, padT = 12, padB = 26, padR = 48;
   const iw = W-padR, plotH = H-padT-padB;
-  const maxImg = Math.max(...days.map(d => d.images)) || 1;
-  const maxCpi = (Math.max(...days.map(d => d.cpi))*1.15) || 1;
-  const step = iw/days.length, bw = Math.max(1, step-2);
+  const maxImg = Math.max(...pts.map(d => d.images)) || 1;
+  const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.15) || 1;
+  const step = iw/pts.length, bw = Math.max(1, Math.min(46, step-6));
   const cx = i => i*step + step/2, cy = v => padT + plotH - v/maxCpi*plotH;
 
-  let s = days.map((d,i) => {
+  let s = pts.map((d,i) => {
     const h = d.images/maxImg*plotH;
     return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-h}" width="${bw}" height="${h}" fill="var(--rule)"/>`;
   }).join("");
-  s += `<polyline points="${days.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round"/>`;
-  s += days.map((d,i) => `<g><title>${d.date} · ${int(d.images)} images · ${money(d.cpi)} per image</title>`
+  s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" stroke="var(--ink)" stroke-width="1.6" stroke-linejoin="round"/>`;
+  s += pts.map((d,i) => `<g><title>${d.date} · ${int(d.images)} images · ${money(d.cpi)} per image</title>`
     + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="8" fill="transparent"/>`
-    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.2" fill="${costColor(d.cpi/(T.blended||1))}"/></g>`).join("");
+    + `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="2.4" fill="${costColor(d.cpi/(T.blended||1))}"/></g>`).join("");
   s += `<text x="${W}" y="${padT+8}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi)}</text>`
-     + `<text x="0" y="${H-6}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${days[0].date}</text>`
-     + `<text x="${iw}" y="${H-6}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${days[days.length-1].date}</text>`;
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
-  svg.innerHTML = s;
+     + `<text x="0" y="${H-6}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${pts[0].date}</text>`
+     + `<text x="${iw}" y="${H-6}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${pts[pts.length-1].date}</text>`;
+  svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H); svg.innerHTML = s;
 }
 
 const COLS = {
@@ -829,10 +908,15 @@ const COLS = {
     ["images","Images"],["vins","VINs"],["cost","Allocated cost"],["accuracy","Accuracy"],["cpi","Cost/image"]]
 };
 
-function renderTable(pms, teams, T){
+function renderTable(pms, teams, T, scoped){
   const v = S.view;
+  el("table-note").innerHTML = (v === "people" && scoped)
+    ? `<div class="scoped">Account filters don't apply to people — a QC reviewer works across many
+       rooftops, so their salary can't be split by enterprise. Switch to Accounts or Rooftops for
+       filtered figures.</div>` : "";
+
   let data;
-  if (v === "people")   data = mFilter() ? pms.map(p => ({...p, months:1})) : byPerson(pms);
+  if (v === "people")   data = F().month ? pms.map(p => ({...p, months:1})) : byPerson(pms);
   if (v === "accounts") data = rollTeams(teams, r => r.enterprise, r => ({label:r.enterprise}));
   if (v === "teams")    data = rollTeams(teams, r => r.team_id,
     r => ({label:r.team_name, sub:r.enterprise, segment:r.segment, dealer_type:r.dealer_type}));
@@ -845,7 +929,7 @@ function renderTable(pms, teams, T){
     if (bv == null) return -1;
     return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * S.sortDir;
   });
-  document.getElementById("row-n").textContent =
+  el("row-n").textContent =
     `${int(data.length)} ${v === "people" ? "people" : v === "accounts" ? "enterprises" : "rooftops"}`;
 
   document.querySelector("#tbl thead").innerHTML = "<tr>" + cols.map(([k,l]) =>
@@ -869,8 +953,7 @@ function renderTable(pms, teams, T){
         <td class="num">${r.cost ? money(r.cost) : "—"}</td><td class="num">${cpi}</td></tr>`;
     }
     if (v === "accounts"){
-      return `<tr>
-        <td>${esc(r.label)}</td>
+      return `<tr><td>${esc(r.label)}</td>
         <td class="num">${int(r.rooftops)}</td><td class="num">${int(r.people)}</td>
         <td class="num">${int(r.images)}</td><td class="num">${r.vins?int(r.vins):"—"}</td>
         <td class="num">${r.cost?money(r.cost):"—"}</td>
@@ -896,60 +979,82 @@ function renderTable(pms, teams, T){
 /* ==========================================================================
    7. WIRING
    ========================================================================== */
-function afterLoad(source){
-  const months = [...new Set([...S.daily.map(r=>r.month_key), ...S.teams.map(r=>r.month_key)])]
-    .filter(Boolean).sort().reverse();
-  document.getElementById("f-month").innerHTML =
-    `<option value="">All months</option>` + months.map(m => `<option>${m}</option>`).join("");
-  const segs = [...new Set(S.teams.map(r => r.segment))].filter(Boolean).sort();
-  document.getElementById("f-seg").innerHTML =
-    `<option value="">All segments</option>` + segs.map(s => `<option>${esc(s)}</option>`).join("");
+function fillOptions(id, values, allLabel){
+  const cur = el(id).value;
+  el(id).innerHTML = `<option value="">${allLabel}</option>`
+    + values.map(v => `<option${v===cur?" selected":""}>${esc(v)}</option>`).join("");
+}
+function fillRooftops(){
+  const ent = val("f-ent").toLowerCase();
+  const roofs = [...new Set(S.teams
+    .filter(t => !ent || t.enterprise.toLowerCase() === ent)
+    .map(t => t.team_name))].sort();
+  el("l-roof").innerHTML = roofs.map(r => `<option value="${esc(r)}">`).join("");
+}
 
+function coverage(){
   const pms = byPersonMonth(S.daily);
   const unpriced = pms.filter(p => p.cpi == null);
+  const noAcc = S.teams.filter(t => t.true_accuracy == null);
+  const items = [], chips = [];
+
   if (unpriced.length){
     const lost = unpriced.reduce((a,p) => a + p.images, 0);
     const share = lost / Math.max(1, pms.reduce((a,p) => a + p.images, 0)) * 100;
     const who = [...new Set(unpriced.map(p => p.email))];
-    banner(`<b>${who.length} QC email${who.length>1?"s":""} had no salary row for the months they worked.</b>
-      ${int(lost)} images (${dec(share)}% of output) counted with zero cost, so the blended rate is understated.
-      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+    chips.push(`${dec(share)}% images unpriced`);
+    items.push(`<div class="cov-item"><b>${who.length} QC emails have no salary row for the months
+      they worked.</b> ${int(lost)} images at zero cost — the blended rate is understated by roughly
+      ${dec(share)}%.<ul><li>${who.slice(0,15).map(esc).join("</li><li>")}${who.length>15?`</li><li>+${who.length-15} more`:""}</li></ul></div>`);
   }
-
-  // ai_accuracy coverage — a team-month with no accuracy row silently leaves the scatter
-  const noAcc = S.teams.filter(t => t.true_accuracy == null);
   if (noAcc.length){
     const lost = noAcc.reduce((a,t) => a + t.images, 0);
-    const all  = S.teams.reduce((a,t) => a + t.images, 0);
+    const all = S.teams.reduce((a,t) => a + t.images, 0) || 1;
     const roofs = [...new Set(noAcc.map(t => t.team_name))];
-    banner(`<b>${noAcc.length} team-months have delivery data but no ai_accuracy row.</b>
-      ${int(lost)} images (${dec(lost/Math.max(1,all)*100)}% of rooftop output) sit outside every
-      accuracy figure and don't appear in the scatter. Their cost still counts.
-      <ul><li>${roofs.slice(0,6).map(esc).join("</li><li>")}${roofs.length>6?`</li><li>and ${roofs.length-6} more rooftops`:""}</li></ul>`);
+    chips.push(`${noAcc.length} team-months without accuracy`);
+    items.push(`<div class="cov-item"><b>${noAcc.length} team-months have delivery data but no
+      ai_accuracy row.</b> ${int(lost)} images (${dec(lost/all*100)}%) are absent from the scatter,
+      though their cost still counts. UNKNOWN_TEAM means a blank Team_id, which can never join.
+      <ul><li>${roofs.slice(0,15).map(esc).join("</li><li>")}${roofs.length>15?`</li><li>+${roofs.length-15} more`:""}</li></ul></div>`);
   }
-
-  const exc = S.excluded;
-  if (exc.length){
-    const who = [...new Set(exc.map(e => e.email))];
-    const imgs = exc.reduce((a,e) => a + e.images, 0);
-    const inScope = pms.reduce((a,p) => a + p.images, 0);
-    banner(`<b>Excluded by the domain filter: ${who.length} email${who.length>1?"s":""}, ${int(imgs)} images.</b>
-      ${dec(imgs/Math.max(1,imgs+inScope)*100)}% of all QC output, outside every number here.
-      Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
-      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+  if (S.excluded.length){
+    const who = [...new Set(S.excluded.map(e => e.email))];
+    const imgs = S.excluded.reduce((a,e) => a + e.images, 0);
+    chips.push(`${who.length} emails excluded`);
+    items.push(`<div class="cov-item"><b>Domain filter excluded ${who.length} emails,
+      ${int(imgs)} images.</b> Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
+      <ul><li>${who.slice(0,15).map(esc).join("</li><li>")}</li></ul></div>`);
   }
+  el("coverage").innerHTML = items.length
+    ? `<details class="cov"><summary>Data coverage: ${chips.join(" · ")}</summary>
+       <div class="cov-body">${items.join("")}</div></details>` : "";
+}
 
+function afterLoad(source){
+  const months = [...new Set([...S.daily.map(r=>r.month_key), ...S.teams.map(r=>r.month_key)])]
+    .filter(Boolean).sort().reverse();
+  fillOptions("f-month", months, "All months");
+  fillOptions("f-seg", [...new Set(S.teams.map(t=>t.segment))].filter(Boolean).sort(), "All segments");
+  fillOptions("f-dt",  [...new Set(S.teams.map(t=>t.dealer_type))].filter(Boolean).sort(), "All dealer types");
+  fillOptions("f-poc", [...new Set(S.teams.map(t=>t.poc))].filter(Boolean).sort(), "All POCs");
+  el("l-ent").innerHTML = [...new Set(S.teams.map(t=>t.enterprise))].sort()
+    .map(e => `<option value="${esc(e)}">`).join("");
+  fillRooftops();
+  coverage();
   document.querySelector(".hero-panel").classList.add("rise");
   render();
   console.log("Loaded from", source, "—", S.daily.length, "daily,", S.teams.length, "team-months");
 }
 
-document.getElementById("sql-a").value = SQL_A;
-document.getElementById("sql-b").value = SQL_B;
-document.getElementById("sql-c").value = SQL_C;
-document.getElementById("btn-run").addEventListener("click", runQuery);
-["f-month","f-seg"].forEach(id => document.getElementById(id).addEventListener("change", render));
-document.getElementById("f-search").addEventListener("input", render);
+el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
+el("btn-run").addEventListener("click", runQuery);
+["f-month","f-seg","f-dt","f-poc"].forEach(id => el(id).addEventListener("change", render));
+el("f-ent").addEventListener("input", () => { el("f-roof").value = ""; fillRooftops(); render(); });
+["f-roof","f-search"].forEach(id => el(id).addEventListener("input", render));
+el("btn-clear").addEventListener("click", () => {
+  ["f-month","f-seg","f-dt","f-poc","f-ent","f-roof","f-search"].forEach(id => el(id).value = "");
+  fillRooftops(); render();
+});
 
 document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click", () => {
   document.querySelectorAll("#seg button").forEach(x => x.classList.remove("on"));
@@ -958,17 +1063,17 @@ document.querySelectorAll("#seg button").forEach(b => b.addEventListener("click"
   render();
 }));
 
-document.getElementById("btn-csv").addEventListener("click", () => {
+el("btn-csv").addEventListener("click", () => {
   const pms = byPersonMonth(dailyView()), teams = teamView();
   let rows;
   if (S.view === "people"){
     rows = [["email","name","employee_number","match","months","days","images","hours","images_per_hour","allocated_cost","cost_per_image"],
-      ...(mFilter() ? pms.map(p=>({...p,months:1})) : byPerson(pms)).map(p =>
+      ...(F().month ? pms.map(p=>({...p,months:1})) : byPerson(pms)).map(p =>
         [p.email,p.name,p.emp_no,p.match_type,p.months,p.days,p.images,p.hours.toFixed(0),
          p.iph.toFixed(2),p.cost.toFixed(2),p.cpi==null?"":p.cpi.toFixed(4)])];
   }else{
-    rows = [["month","team_id","rooftop","enterprise","segment","dealer_type","qc_people","images","unpriced_images","vins","accuracy_images","true_accuracy","allocated_cost","cost_per_image"],
-      ...teams.map(t => [t.month_key,t.team_id,t.team_name,t.enterprise,t.segment,t.dealer_type,
+    rows = [["month","team_id","rooftop","enterprise","segment","poc","dealer_type","qc_people","images","unpriced_images","vins","accuracy_images","true_accuracy","allocated_cost","cost_per_image"],
+      ...teams.map(t => [t.month_key,t.team_id,t.team_name,t.enterprise,t.segment,t.poc,t.dealer_type,
         t.people,t.images,t.unpriced_images,t.vins??"",t.acc_images??"",t.true_accuracy??"",
         t.allocated_cost.toFixed(2),
         (t.images-t.unpriced_images) ? (t.allocated_cost/(t.images-t.unpriced_images)).toFixed(4) : ""])];
@@ -988,8 +1093,7 @@ let rt; addEventListener("resize", () => { clearTimeout(rt); rt = setTimeout(ren
   S.daily = s.daily.map(normDaily);
   S.teams = s.teams.map(normTeam);
   S.excluded = s.excluded.map(normExcl);
-  banner(`<b>Showing sample data.</b> Nothing is connected yet — press <b>Run query</b> to sign in
-    and pull from BigQuery, or commit a <b>${CONFIG.jsonFallback}</b> next to this file.`);
+  alert_(`<b>Showing sample data.</b> Press <b>Run query</b> to sign in and pull from BigQuery.`);
   afterLoad("sample data");
 })();
 </script>
