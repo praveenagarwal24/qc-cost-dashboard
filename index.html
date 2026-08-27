@@ -355,7 +355,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v3 · 27 Aug 2026";
+const VERSION = "v4 · 27 Aug 2026";
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -1141,12 +1141,17 @@ function segmentTable(teams, T){
     if (t.segment && !pinned.has(t.team_id)) pinned.set(t.team_id, t.segment);
 
   const blank = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
-    cost:0, vins:0, costWithVins:0, arrMonth:0, costWithArr:0, accNum:0, accDen:0});
+    cost:0, vins:0, costWithVins:0, imagesWithVins:0,
+    arrMonth:0, costWithArr:0, accNum:0, accDen:0});
   const add = (x, t) => {
     x.ents.add(t.enterprise); x.roofs.add(t.team_id);
     x.images += t.images; x.priced += t.images - t.unpriced_images;
     x.cost += t.allocated_cost;
-    if (t.vins){ x.vins += t.vins; x.costWithVins += t.allocated_cost; }
+    if (t.vins){
+      x.vins += t.vins;
+      x.costWithVins += t.allocated_cost;
+      x.imagesWithVins += t.images;   // numerator must match the VIN denominator
+    }
     if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
     if (t.true_accuracy != null && t.acc_images){
       x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
@@ -1155,6 +1160,7 @@ function segmentTable(teams, T){
   const derive = x => ({...x,
     ents: x.ents.size, roofs: x.roofs.size,
     cpi: x.priced ? x.cost/x.priced : null,
+    imagesPerVin: x.vins ? x.imagesWithVins/x.vins : null,
     costPerVin: x.vins ? x.costWithVins/x.vins : null,
     costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
     acc: x.accDen ? x.accNum/x.accDen : null });
@@ -1178,6 +1184,7 @@ function segmentTable(teams, T){
       <td>${int(r.roofs)}</td>
       <td>${r.vins ? int(r.vins) : dash}</td>
       <td>${int(r.images)}</td>
+      <td>${r.imagesPerVin == null ? dash : dec(r.imagesPerVin,1)}</td>
       <td>${r.cpi == null ? dash : money(r.cpi)}</td>
       <td>${r.costPerVin == null ? dash : money(r.costPerVin)}</td>
       <td>${r.costToServe == null ? dash : dec(r.costToServe,1) + "%"}</td>
@@ -1185,7 +1192,7 @@ function segmentTable(teams, T){
   };
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
-      <th>Images</th><th>Cost / image</th><th>Cost / VIN</th><th>Cost to serve</th>
+      <th>Images</th><th>Images / VIN</th><th>Cost / image</th><th>Cost / VIN</th><th>Cost to serve</th>
       <th>True accuracy</th></tr></thead>
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(derive(all), true)}</tbody>
