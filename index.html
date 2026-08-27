@@ -65,7 +65,12 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .tick rect{transition:opacity .12s}
 .tick:hover rect{opacity:1;stroke:var(--ink);stroke-width:1}
 
-.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:1px;background:var(--rule-soft)}
+.kpi-group{border-top:1px solid var(--rule-soft)}
+.kpi-label{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
+  letter-spacing:.14em;text-transform:uppercase;color:var(--steel-light);
+  padding:10px var(--pad) 0}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(146px,1fr));gap:1px;
+  background:var(--rule-soft);margin-top:10px}
 .kpi{background:var(--card);padding:14px var(--pad)}
 .kpi .v{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:21px;
   letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px}
@@ -139,6 +144,19 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 @keyframes rise{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
 @media(prefers-reduced-motion:reduce){.rise{animation:none}*{transition:none!important}}
 
+/* ---------- loading ---------- */
+#loader{position:fixed;inset:0;z-index:90;background:#0b1017;color:#e7ecf2;
+  display:none;flex-direction:column;align-items:center;justify-content:center;gap:30px}
+#loader.show{display:flex}
+.load-bars{display:flex;align-items:flex-end;gap:9px;height:96px}
+.load-bars i{display:block;width:15px;border-radius:4px;transform-origin:bottom;
+  animation:pulse 1.15s ease-in-out infinite}
+@keyframes pulse{0%,100%{transform:scaleY(.42)}50%{transform:scaleY(1)}}
+@media(prefers-reduced-motion:reduce){.load-bars i{animation:none;transform:scaleY(.75)}}
+#load-msg{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:19px;
+  letter-spacing:.01em;color:#fff;min-height:26px;text-align:center;padding:0 24px}
+#load-sub{font-family:"IBM Plex Mono",monospace;font-size:12px;color:#5b7488;margin-top:-20px}
+
 /* ---------- sign-in gate ---------- */
 #gate{position:fixed;inset:0;z-index:100;background:#0b1017;color:#e7ecf2;
   display:grid;grid-template-columns:1.15fr .85fr;overflow:auto}
@@ -183,6 +201,12 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 </style>
 </head>
 <body>
+<div id="loader">
+  <div class="load-bars" id="load-bars"></div>
+  <div id="load-msg">Connecting to BigQuery…</div>
+  <div id="load-sub">three queries · 421k hourly rows</div>
+</div>
+
 <div id="gate">
   <div class="gate-brand">
     <div class="gate-mark"><i></i><i></i><i></i><i></i></div>
@@ -271,7 +295,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <div class="hero-note" id="hero-note"></div>
       <div class="strip" id="strip-wrap"><svg class="strip-svg" id="strip" role="img" aria-label="Cost per image distribution across QC staff"></svg></div>
     </div>
-    <div class="kpis" id="kpis"></div>
+    <div id="kpis"></div>
   </div>
 
   <div class="panel">
@@ -318,7 +342,11 @@ const CONFIG = {
   dataset : "spyne_reviews",
   clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",
   symbol  : "\u20B9",
-  qcDomains: ["spyne.co.in"],
+  // Cohorts. Anything on an excluded domain is dropped entirely; of what
+  // remains, inhouse domains are payroll staff and everything else is OS
+  // (outsourced). That's how the Inhouse / OS cost split is derived.
+  inhouseDomains: ["spyne.co.in"],
+  excludeDomains: ["spyne.ai"],
 
   // Who may open the page. This is a courtesy check only — the real gates are
   // the Google test-user list and BigQuery IAM, both enforced server-side.
@@ -329,8 +357,11 @@ const CONFIG = {
 /* ==========================================================================
    2. SQL
    ========================================================================== */
-const QC_DOMAINS = CONFIG.qcDomains
+const like = (list) => list
   .map(d => `LOWER(TRIM(QC)) LIKE '%@${d.replace(/^@/, "")}'`).join("\n         OR ");
+const EXCLUDED = like(CONFIG.excludeDomains);
+const isInhouse = email => CONFIG.inhouseDomains
+  .some(d => email.endsWith("@" + d.replace(/^@/, "")));
 
 const ACC_MONTH = `FORMAT_DATE('%Y-%m', COALESCE(
       SAFE.PARSE_DATE("%e %b, %Y", TRIM(Month)),
@@ -355,7 +386,7 @@ WITH work AS (
     IFNULL(SKU_Count, 0)                             AS sku_count
   FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
   WHERE QC IS NOT NULL AND TRIM(QC) != ''
-    AND (${QC_DOMAINS})
+    AND NOT (${EXCLUDED})       -- internal @spyne.ai staff aren't delivery cost
 ),
 salary_raw AS (
   SELECT
@@ -460,7 +491,7 @@ SELECT
   COUNT(DISTINCT Hourly_Date)                 AS hours
 FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
 WHERE QC IS NOT NULL AND TRIM(QC) != ''
-  AND NOT (${QC_DOMAINS})
+  AND (${EXCLUDED})
 GROUP BY month_key, email
 ORDER BY images DESC
 LIMIT 500`;
@@ -570,6 +601,7 @@ function setGateBusy(busy){
   el("gate-btn-text").textContent = busy ? "Signing in…" : "Continue with Google";
 }
 function signOut(msg){
+  stopLoader();
   if (AUTH.token && window.google?.accounts?.oauth2)
     try { google.accounts.oauth2.revoke(AUTH.token, () => {}); } catch(e){}
   AUTH.token = null; AUTH.email = null;
@@ -591,9 +623,42 @@ async function bq(sql){
   return (data.rows || []).map(r => { const o = {}; cols.forEach((c,i) => o[c] = r.f[i].v); return o; });
 }
 
+const LOAD_STEPS = [
+  ["Connecting to BigQuery…",        "authorising the session"],
+  ["Reading delivery working data…", "421k hourly QC rows"],
+  ["Joining salary on email + month…","monthly actuals, not a flat rate"],
+  ["Allocating cost across output…", "salary ÷ images, per person per month"],
+  ["Weighting accuracy by volume…",  "ai_accuracy on team + month"],
+  ["Rolling up rooftops…",           "almost there"]
+];
+let loadTimer = null;
+
+function startLoader(){
+  const bars = el("load-bars");
+  if (!bars.childElementCount){
+    bars.innerHTML = [0,.2,.4,.6,.8,1].map((t,i) =>
+      `<i style="height:${52+Math.sin(i)*30}px;background:${costColor(.55+t*1.35)};
+         animation-delay:${(i*0.12).toFixed(2)}s"></i>`).join("");
+  }
+  let i = 0;
+  const tick = () => {
+    el("load-msg").textContent = LOAD_STEPS[i][0];
+    el("load-sub").textContent = LOAD_STEPS[i][1];
+    i = Math.min(i + 1, LOAD_STEPS.length - 1);
+  };
+  tick();
+  clearInterval(loadTimer);
+  loadTimer = setInterval(tick, 1400);
+  el("loader").classList.add("show");
+}
+function stopLoader(){
+  clearInterval(loadTimer); loadTimer = null;
+  el("loader").classList.remove("show");
+}
+
 async function runQuery(){
   const btn = el("btn-run");
-  btn.disabled = true; btn.textContent = "Loading…"; clearAlerts();
+  btn.disabled = true; btn.textContent = "Loading…"; clearAlerts(); startLoader();
   try{
     const [a,b,c] = await Promise.all([
       bq(el("sql-a").value), bq(el("sql-b").value), bq(el("sql-c").value)]);
@@ -602,13 +667,14 @@ async function runQuery(){
   }catch(e){
     if (e.expired) return signOut("Your session expired. Please sign in again.");
     alert_(`<b>Couldn't load data.</b> ${esc(e.message)}`);
-  }finally{ btn.disabled = false; btn.textContent = "Refresh"; }
+  }finally{ stopLoader(); btn.disabled = false; btn.textContent = "Refresh"; }
 }
 
 const num = v => v == null || v === "" ? null : Number(v);
 const normDaily = o => ({
   month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
   name:o.name || (o.email||"").split("@")[0], emp_no:o.emp_no||"",
+  cohort: isInhouse((o.email||"").toLowerCase()) ? "inhouse" : "os",
   match_type:o.match_type||"none", work_date:String(o.work_date||"").slice(0,10),
   hours:num(o.hours)||0, images:num(o.images)||0,
   tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
@@ -653,7 +719,8 @@ function sample(){
     ["Chhotu Singh","chhotu.singh@spyne.co.in","E6650"],["Pradeep Singh","pradeep.singh@spyne.co.in","E6661"],
     ["Rambha Prajapati","rambha.prajapati@spyne.co.in","E6670"],["Kavi Singh","kavi.singh@spyne.co.in","E6682"],
     ["Samir Ansari","samir.ansari@spyne.co.in","E6690"],["Lalit Shukla","lalit.shukla@spyne.co.in","E6701"],
-    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"]
+    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"],
+    ["Bestakki Kumar","bestakkikumar@gmail.com",""],["Vendor Two","vendor.two@partner.co","" ]
   ];
   const roofs = [
     ["Bentley Tampa Bay","11df1566a","dimmitt automotive","9dd9791eb","FRANCHISE","Ent","Unassigned"],
@@ -714,7 +781,7 @@ function sample(){
     });
   }));
   const excluded = [];
-  ["raj.tripathi@spyne.ai","rafil.khan@spyne.ai","lalit.shukla@spyne.ai"].forEach((e,i) =>
+  ["raj.tripathi@spyne.ai","kishor@spyne.ai","abhinav.sinha@spyne.ai"].forEach((e,i) =>
     months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
   return {daily, teams, excluded};
 }
@@ -757,8 +824,8 @@ function byPersonMonth(rows){
     const k = r.email + "|" + r.month_key;
     let p = m.get(k);
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
-      match_type:r.match_type, salary:r.month_salary, images:0, hours:0, days:0, cost:0,
-      priced:r.allocated_cost != null});
+      match_type:r.match_type, cohort:r.cohort, salary:r.month_salary,
+      images:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
     p.images += r.images; p.hours += r.hours; p.days += 1;
     if (r.allocated_cost != null) p.cost += r.allocated_cost;
   }
@@ -771,7 +838,8 @@ function byPerson(pms){
   for (const p of pms){
     let x = m.get(p.email);
     if (!x) m.set(p.email, x = {email:p.email, name:p.name, emp_no:p.emp_no,
-      match_type:p.match_type, months:0, images:0, hours:0, days:0, cost:0, pricedImages:0});
+      match_type:p.match_type, cohort:p.cohort,
+      months:0, images:0, hours:0, days:0, cost:0, pricedImages:0});
     x.months++; x.images += p.images; x.hours += p.hours; x.days += p.days;
     if (p.cpi != null){ x.cost += p.cost; x.pricedImages += p.images; }
     if (p.match_type === "email") x.match_type = "email";
@@ -815,24 +883,42 @@ function rollTeams(rows, keyFn, labelFn){
 /* When account filters are on, headline figures come from the team rows so they
    actually reflect the filter. Hours only exist per person, so they drop out. */
 function totals(pms, teams, scoped){
-  const accuracy = weightedAccuracy(teams);
-  const base = { accuracy,
+  /* VINs only exist on team-months that have an ai_accuracy row, so cost per VIN
+     is computed over that same subset. Dividing all cost by partial VINs would
+     inflate the figure by whatever share of work has no accuracy row. */
+  let vins = 0, costWithVins = 0;
+  for (const t of teams){
+    if (!t.vins) continue;
+    vins += t.vins; costWithVins += t.allocated_cost;
+  }
+  const base = { vins, costWithVins,
+    costPerVin: vins ? costWithVins/vins : null,
+    accuracy: weightedAccuracy(teams),
     accounts: new Set(teams.map(t => t.enterprise)).size,
-    rooftops: new Set(teams.map(t => t.team_id)).size,
-    vins: teams.reduce((a,t) => a + (t.vins||0), 0) };
+    rooftops: new Set(teams.map(t => t.team_id)).size };
+
   if (scoped){
     const cost = teams.reduce((a,t) => a + t.allocated_cost, 0);
     const priced = teams.reduce((a,t) => a + (t.images - t.unpriced_images), 0);
-    return {...base, cost, pricedImages:priced,
+    return {...base, cost, pricedImages:priced, costInhouse:null, costOs:null,
       images: teams.reduce((a,t) => a + t.images, 0),
-      hours: null, heads: null, blended: priced ? cost/priced : 0 };
+      hours:null, heads:null, headsInhouse:null, headsOs:null,
+      blended: priced ? cost/priced : 0 };
   }
   const cost = pms.reduce((a,p) => a + p.cost, 0);
   const priced = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
+  const inh = pms.filter(p => p.cohort === "inhouse");
+  const os  = pms.filter(p => p.cohort === "os");
   return {...base, cost, pricedImages:priced,
+    costInhouse: inh.reduce((a,p) => a + p.cost, 0),
+    costOs:      os.reduce((a,p) => a + p.cost, 0),
+    imagesInhouse: inh.reduce((a,p) => a + p.images, 0),
+    imagesOs:      os.reduce((a,p) => a + p.images, 0),
     images: pms.reduce((a,p) => a + p.images, 0),
     hours: pms.reduce((a,p) => a + p.hours, 0),
     heads: new Set(pms.map(p => p.email)).size,
+    headsInhouse: new Set(inh.map(p => p.email)).size,
+    headsOs: new Set(os.map(p => p.email)).size,
     blended: priced ? cost/priced : 0 };
 }
 
@@ -914,19 +1000,38 @@ function renderHero(pms, T, scoped){
 }
 
 function renderKpis(T, scoped){
-  const items = [
-    ["Images", int(T.images), "in view"],
-    ["Allocated cost", money(T.cost), "salary spread over output"],
-    ["True accuracy", pct(T.accuracy), "image-weighted"],
-    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`],
-    ["VINs", T.vins ? int(T.vins) : "—", "from ai_accuracy"]
+  const share = (part) => T.cost && part != null
+    ? dec(part/T.cost*100) + "% of delivery" : "";
+  const cost = [
+    ["Delivery cost", money(T.cost), "inhouse + OS, allocated"],
+    ["Inhouse cost", T.costInhouse == null ? "—" : money(T.costInhouse),
+      T.costInhouse == null ? "not split when scoped"
+        : `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${share(T.costInhouse)}`],
+    ["OS cost", T.costOs == null ? "—" : money(T.costOs),
+      T.costOs == null ? "not split when scoped" : `outsourced · ${share(T.costOs)}`],
+    ["Total images", int(T.images), "delivered in view"],
+    ["Total VINs", T.vins ? int(T.vins) : "—", "team-months with accuracy"],
+    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
+    ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
+      T.costPerVin == null ? "needs VIN counts" : "over VIN-covered work"]
   ];
-  if (!scoped) items.push(
+  const ops = [
+    ["True accuracy", pct(T.accuracy), "image-weighted"],
+    ["Rooftops", int(T.rooftops), `${int(T.accounts)} enterprises`]
+  ];
+  if (!scoped) ops.push(
+    ["QC people", int(T.heads), `${int(T.headsInhouse)} inhouse · ${int(T.headsOs)} OS`],
     ["Hours", int(T.hours), "distinct working hours"],
-    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"],
-    ["QC people", int(T.heads), "with output"]);
-  el("kpis").innerHTML = items.map(([l,v,d]) =>
-    `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
+    ["Images / hour", T.hours ? dec(T.images/T.hours) : "—", "blended throughput"]);
+
+  const cards = list => list.map(([l,v,d]) =>
+    `<div class="kpi"><div class="eyebrow">${l}</div><div class="v">${v}</div>
+     <div class="d">${d}</div></div>`).join("");
+  el("kpis").innerHTML =
+    `<div class="kpi-group"><div class="kpi-label">Cost and volume</div>
+       <div class="kpis">${cards(cost)}</div></div>
+     <div class="kpi-group"><div class="kpi-label">Quality and effort</div>
+       <div class="kpis">${cards(ops)}</div></div>`;
 }
 
 function renderScatter(teams, T){
@@ -1168,9 +1273,11 @@ function coverage(){
   if (S.excluded.length){
     const who = [...new Set(S.excluded.map(e => e.email))];
     const imgs = S.excluded.reduce((a,e) => a + e.images, 0);
-    chips.push(`${who.length} emails excluded`);
-    items.push(`<div class="cov-item"><b>Domain filter excluded ${who.length} emails,
-      ${int(imgs)} images.</b> Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
+    chips.push(`${who.length} internal emails excluded`);
+    items.push(`<div class="cov-item"><b>${who.length} internal emails excluded,
+      ${int(imgs)} images.</b> Anyone on ${CONFIG.excludeDomains.map(d=>"@"+d).join(", ")} is
+      treated as internal staff rather than delivery cost. Everyone else counts:
+      ${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} as inhouse, all other domains as OS.
       <ul><li>${who.slice(0,15).map(esc).join("</li><li>")}</li></ul></div>`);
   }
   el("coverage").innerHTML = items.length
