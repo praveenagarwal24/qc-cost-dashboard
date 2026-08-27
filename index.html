@@ -97,6 +97,21 @@ tbody tr:hover td{background:#f7f9fb}
   padding:11px var(--pad);border-radius:var(--radius);margin-bottom:14px;font-size:13px}
 .banner b{font-weight:500}
 .banner ul{margin:6px 0 0;padding-left:18px}
+details.cov{margin-bottom:14px;border:1px solid var(--warn-rule);background:var(--warn-bg);
+  border-radius:var(--radius);font-size:13px;color:var(--warn-ink)}
+details.cov summary{cursor:pointer;list-style:none;padding:9px var(--pad);
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+details.cov summary::-webkit-details-marker{display:none}
+details.cov summary::after{content:"show detail";margin-left:auto;font-size:11px;
+  font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;
+  letter-spacing:.08em;text-transform:uppercase;opacity:.65}
+details.cov[open] summary::after{content:"hide"}
+details.cov summary b{font-weight:500}
+.cov-body{padding:0 var(--pad) 14px;border-top:1px solid var(--warn-rule);margin-top:2px;padding-top:12px}
+.cov-item{margin-bottom:12px}
+.cov-item:last-child{margin-bottom:0}
+.cov-item ul{margin:5px 0 0;padding-left:18px;columns:2;column-gap:28px}
+@media(max-width:700px){.cov-item ul{columns:1}}
 .status{font-size:12px;color:var(--steel);font-family:"IBM Plex Mono",monospace}
 
 details.sql{margin-bottom:14px}
@@ -204,7 +219,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 const CONFIG = {
   project : "inspired-frame-453018-r2",
   dataset : "spyne_reviews",
-  clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",              // OAuth client ID (Web application) from GCP
+  clientId: "",              // OAuth client ID (Web application) from GCP
   symbol  : "\u20B9",
   qcDomains: ["spyne.co.in"],
   jsonFallback: "data.json"  // {daily, teams, categories, excluded}
@@ -383,7 +398,23 @@ function costColor(ratio){
 }
 const banner = html => document.getElementById("banners")
   .insertAdjacentHTML("beforeend", `<div class="banner">${html}</div>`);
-const clearBanners = () => document.getElementById("banners").innerHTML = "";
+const clearBanners = () => { NOTES.length = 0;
+  document.getElementById("banners").innerHTML = ""; };
+
+/* Coverage gaps are worth surfacing but not worth three banners shoving the
+   numbers below the fold. They collapse into one line; detail on click. */
+const NOTES = [];
+const note = (chip, title, body) => NOTES.push({chip, title, body});
+
+function flushNotes(){
+  if (!NOTES.length) return;
+  document.getElementById("banners").insertAdjacentHTML("beforeend",
+    `<details class="cov"><summary>`
+    + NOTES.map(n => `<b>${n.chip}</b>`).join(`<span style="opacity:.4">·</span>`)
+    + `</summary><div class="cov-body">`
+    + NOTES.map(n => `<div class="cov-item"><b>${n.title}</b> ${n.body}</div>`).join("")
+    + `</div></details>`);
+}
 
 /* ==========================================================================
    4. DATA IN
@@ -911,21 +942,25 @@ function afterLoad(source){
     const lost = unpriced.reduce((a,p) => a + p.images, 0);
     const share = lost / Math.max(1, pms.reduce((a,p) => a + p.images, 0)) * 100;
     const who = [...new Set(unpriced.map(p => p.email))];
-    banner(`<b>${who.length} QC email${who.length>1?"s":""} had no salary row for the months they worked.</b>
-      ${int(lost)} images (${dec(share)}% of output) counted with zero cost, so the blended rate is understated.
-      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+    note(`${dec(share)}% of images unpriced`,
+      `${who.length} QC emails had no salary row for the months they worked.`,
+      `${int(lost)} images counted at zero cost, so the blended rate is understated by roughly
+       ${dec(share)}%. Either they're on a different pay sheet, or their Work Email in salary_sheet
+       is spelled differently.
+       <ul><li>${who.slice(0,12).map(esc).join("</li><li>")}${who.length>12?`</li><li>and ${who.length-12} more`:""}</li></ul>`);
   }
 
-  // ai_accuracy coverage — a team-month with no accuracy row silently leaves the scatter
   const noAcc = S.teams.filter(t => t.true_accuracy == null);
   if (noAcc.length){
     const lost = noAcc.reduce((a,t) => a + t.images, 0);
     const all  = S.teams.reduce((a,t) => a + t.images, 0);
     const roofs = [...new Set(noAcc.map(t => t.team_name))];
-    banner(`<b>${noAcc.length} team-months have delivery data but no ai_accuracy row.</b>
-      ${int(lost)} images (${dec(lost/Math.max(1,all)*100)}% of rooftop output) sit outside every
-      accuracy figure and don't appear in the scatter. Their cost still counts.
-      <ul><li>${roofs.slice(0,6).map(esc).join("</li><li>")}${roofs.length>6?`</li><li>and ${roofs.length-6} more rooftops`:""}</li></ul>`);
+    note(`${noAcc.length} team-months without accuracy`,
+      `${noAcc.length} team-months have delivery data but no ai_accuracy row.`,
+      `${int(lost)} images (${dec(lost/Math.max(1,all)*100)}% of rooftop output) sit outside every
+       accuracy figure and don't appear in the scatter. Their cost still counts. Rows under
+       UNKNOWN_TEAM have a blank Team_id in delivery_working_data, so they can never join.
+       <ul><li>${roofs.slice(0,12).map(esc).join("</li><li>")}${roofs.length>12?`</li><li>and ${roofs.length-12} more rooftops`:""}</li></ul>`);
   }
 
   const exc = S.excluded;
@@ -933,11 +968,13 @@ function afterLoad(source){
     const who = [...new Set(exc.map(e => e.email))];
     const imgs = exc.reduce((a,e) => a + e.images, 0);
     const inScope = pms.reduce((a,p) => a + p.images, 0);
-    banner(`<b>Excluded by the domain filter: ${who.length} email${who.length>1?"s":""}, ${int(imgs)} images.</b>
-      ${dec(imgs/Math.max(1,imgs+inScope)*100)}% of all QC output, outside every number here.
-      Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
-      <ul><li>${who.slice(0,8).map(esc).join("</li><li>")}${who.length>8?`</li><li>and ${who.length-8} more`:""}</li></ul>`);
+    note(`${who.length} emails excluded`,
+      `Excluded by the domain filter: ${who.length} emails, ${int(imgs)} images.`,
+      `${dec(imgs/Math.max(1,imgs+inScope)*100)}% of all QC output, outside every number here.
+       Counted domains: ${CONFIG.qcDomains.map(d=>"@"+d).join(", ")}.
+       <ul><li>${who.slice(0,12).map(esc).join("</li><li>")}${who.length>12?`</li><li>and ${who.length-12} more`:""}</li></ul>`);
   }
+  flushNotes();
 
   document.querySelector(".hero-panel").classList.add("rise");
   render();
