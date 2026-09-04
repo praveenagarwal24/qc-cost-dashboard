@@ -460,7 +460,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v17 · 27 Aug 2026";
+const VERSION = "v18 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1158,18 +1158,20 @@ function totals(pms, teams, scoped){
   /* VINs only exist on team-months that have an ai_accuracy row, so cost per VIN
      is computed over that same subset. Dividing all cost by partial VINs would
      inflate the figure by whatever share of work has no accuracy row. */
-  let vins = 0, costWithVins = 0, imagesWithVins = 0;
+  let vins = 0, costWithVins = 0, imagesWithVins = 0, deliveredWithVins = 0;
   let arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
     const vc = vinsOf(t);
     if (vc){
       const b = vinBase(t);
       vins += vc; costWithVins += b.cost; imagesWithVins += b.images;
+      deliveredWithVins += t.images_acc;
     }
     if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
-  const base = { vins, costWithVins, imagesWithVins, arrMonth, costWithArr, churnedCost,
+  const base = { vins, costWithVins, imagesWithVins, deliveredWithVins,
+    arrMonth, costWithArr, churnedCost,
     imagesPerVin: vins ? imagesWithVins/vins : null,
     costRatio: arrMonth ? costWithArr/arrMonth*100 : null,
     arrCoverage: teams.length
@@ -1429,7 +1431,7 @@ function renderKpis(T, scoped, teams){
     ["Video", P.Video ? int(P.Video) : "—", shareOf(P.Video) || "video product line"],
     ["Total VINs", T.vins ? int(T.vins) : "—", "from ai_accuracy"],
     ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
-      `${CONFIG.accuracyProduct} work only`],
+      "ai_accuracy images ÷ VINs"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
   ];
@@ -1480,13 +1482,16 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    is a per-row counter, so summing it across hourly rows and products would
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
-/* ai_accuracy covers the Images product, so the cost and images paired with
-   VINs exclude Video and 360 — otherwise the rate is inflated by work those
-   vehicles never went through. */
-const vinBase = t => ({ images: t.images_acc, cost: t.cost_acc });
+/* Cost only exists in delivery_working_data, so cost per VIN has to cross the
+   two tables — restricted to the Images product, since that's all ai_accuracy
+   covers. Images per VIN does NOT need to cross them: ai_accuracy carries its
+   own Total_Images against those same VINs, and that pairing is internally
+   consistent. Using delivery images against ai_accuracy VINs mixed a numerator
+   and denominator measuring different things. */
+const vinBase = t => ({ images: t.acc_images || 0, cost: t.cost_acc });
 
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
-  cost:0, vins:0, costWithVins:0, imagesWithVins:0,
+  cost:0, vins:0, costWithVins:0, imagesWithVins:0, deliveredWithVins:0,
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
 function addAgg(x, t){
@@ -1498,7 +1503,8 @@ function addAgg(x, t){
     const b = vinBase(t);
     x.vins += vinCount;
     x.costWithVins += b.cost;
-    x.imagesWithVins += b.images;
+    x.imagesWithVins += b.images;        // ai_accuracy Total_Images
+    x.deliveredWithVins += t.images_acc; // delivery images, Images product
   }
   if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
   if (t.true_accuracy != null && t.acc_images){
@@ -2030,6 +2036,27 @@ function coverage(){
       ${gapMonths.length>1?"those months":"that month"}, but every cost figure for
       ${gapMonths.length>1?"them":"it"} is zero — delivery cost, cost per image and cost per VIN
       included. Volume is real; cost is missing until salary_sheet is extended.</div>`);
+  }
+
+  /* Where ai_accuracy's own image count and delivery's Images-product count
+     disagree sharply, any ratio spanning the two tables is unreliable for that
+     rooftop — name them instead of letting one odd row look like a real finding. */
+  const skew = S.teams
+    .filter(t => t.vins && t.acc_images && t.images_acc)
+    .map(t => ({name:t.team_name, ent:t.enterprise, m:t.month_key,
+                acc:t.acc_images, del:t.images_acc,
+                ratio: t.acc_images / t.images_acc }))
+    .filter(x => x.ratio < 0.34 || x.ratio > 3);
+  if (skew.length){
+    const roofs = [...new Map(skew.map(x => [x.name, x])).values()];
+    chips.push(`${roofs.length} rooftop${roofs.length>1?"s":""} where the two tables disagree`);
+    items.push(`<div class="cov-item"><b>${roofs.length} rooftops report very different image
+      counts in ai_accuracy and delivery_working_data.</b> Images per VIN and cost per VIN cross
+      those two tables, so both are unreliable for these. Usually it means accuracy sampling covers
+      a fraction of what was delivered, or the Team_ID maps to different work on each side.
+      <ul><li>${roofs.slice(0,10).map(x =>
+        `${esc(x.ent)} · ${esc(x.name)} — ${int(x.acc)} accuracy vs ${int(x.del)} delivered`
+      ).join("</li><li>")}${roofs.length>10?`</li><li>+${roofs.length-10} more`:""}</li></ul></div>`);
   }
 
   const multi = S.teams.filter(t => t.acc_rows > 1);
