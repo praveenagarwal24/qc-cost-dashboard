@@ -460,7 +460,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v19 · 27 Aug 2026";
+const VERSION = "v20 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1170,54 +1170,46 @@ function rollTeams(rows, keyFn, labelFn){
 
 /* When account filters are on, headline figures come from the team rows so they
    actually reflect the filter. Hours only exist per person, so they drop out. */
+/* Images, VINs and every rate come from the team rows, so a filtered view and
+   an unfiltered one are computed the same way. The person rows are only used
+   for hours and headcount, which have no team-level equivalent. */
 function totals(pms, teams, scoped){
-  /* VINs only exist on team-months that have an ai_accuracy row, so cost per VIN
-     is computed over that same subset. Dividing all cost by partial VINs would
-     inflate the figure by whatever share of work has no accuracy row. */
-  let vins = 0, costWithVins = 0, imagesWithVins = 0, deliveredWithVins = 0;
+  let vins = 0, images = 0, delivered = 0, cost = 0, costWithVins = 0;
   let arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
-    const vc = vinsOf(t);
-    if (vc){
-      const b = vinBase(t);
-      vins += vc; costWithVins += b.cost; imagesWithVins += b.images;
-      deliveredWithVins += t.images_acc;
+    delivered += t.images;
+    cost += t.allocated_cost;
+    if (t.vin_images || t.vins){
+      vins += t.vins; images += t.vin_images; costWithVins += t.allocated_cost;
     }
     if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
-  const base = { vins, costWithVins, imagesWithVins, deliveredWithVins,
-    arrMonth, costWithArr, churnedCost,
-    imagesPerVin: vins ? imagesWithVins/vins : null,
-    costRatio: arrMonth ? costWithArr/arrMonth*100 : null,
-    arrCoverage: teams.length
+
+  const base = {
+    vins, images, delivered, cost, costWithVins, churnedCost, arrMonth, costWithArr,
+    blended:      images ? costWithVins/images : 0,
+    imagesPerVin: vins ? images/vins : null,
+    costPerVin:   vins ? costWithVins/vins : null,
+    costRatio:    arrMonth ? costWithArr/arrMonth*100 : null,
+    arrCoverage:  teams.length
       ? teams.filter(t => t.arr_month).length / teams.length * 100 : 0,
-    costPerVin: vins ? costWithVins/vins : null,
+    vinCoverage:  teams.length
+      ? teams.filter(t => t.vin_images || t.vins).length / teams.length * 100 : 0,
     accuracy: weightedAccuracy(teams),
     accounts: new Set(teams.map(t => t.enterprise)).size,
-    rooftops: new Set(teams.map(t => t.team_id)).size };
+    rooftops: new Set(teams.map(t => t.team_id)).size
+  };
 
   if (scoped){
-    /* Everything here is the filtered team rows only, so a card never mixes a
-       filtered numerator with an unfiltered denominator. Headcount is a distinct
-       count across the slice, which is why it can't be summed across rows. */
-    const sum = k => teams.reduce((a,t) => a + (t[k]||0), 0);
-    const cost = sum("allocated_cost");
-    const priced = sum("images") - sum("unpriced_images");
-    const hours = sum("hours_attributed");
     const who = new Set();
     for (const t of teams) for (const e of t.reviewers) who.add(e);
-    return {...base, cost, pricedImages:priced,
-      images: sum("images"), hours, heads: who.size,
-      blended: priced ? cost/priced : 0 };
+    return {...base, heads: who.size,
+      hours: teams.reduce((a,t) => a + (t.hours_attributed||0), 0) };
   }
-  const cost = pms.reduce((a,p) => a + p.cost, 0);
-  const priced = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
-  return {...base, cost, pricedImages:priced,
-    images: pms.reduce((a,p) => a + p.images, 0),
+  return {...base,
     hours: pms.reduce((a,p) => a + p.hours, 0),
-    heads: new Set(pms.map(p => p.email)).size,
-    blended: priced ? cost/priced : 0 };
+    heads: new Set(pms.map(p => p.email)).size };
 }
 
 /* ==========================================================================
@@ -1263,7 +1255,7 @@ function renderScope(teams, scoped){
 function renderHero(pms, T, scoped){
   el("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
   el("hero-unit").textContent = T.blended
-    ? `${int(T.pricedImages)} images priced` : "";
+    ? `${int(T.images)} images from vin_images` : "";
   el("hero-cpv").textContent = T.costPerVin == null ? "—" : money(T.costPerVin);
   el("hero-cpv-unit").textContent = T.costPerVin == null
     ? "no VIN counts in view"
@@ -1305,16 +1297,16 @@ function renderMonths(T){
   const m = new Map();
   for (const t of scope){
     const d = m.get(t.month_key) ||
-      {key:t.month_key, images:0, priced:0, cost:0, vins:0, costWithVins:0};
-    d.images += t.images; d.priced += t.images - t.unpriced_images;
+      {key:t.month_key, images:0, cost:0, vins:0, costWithVins:0};
     d.cost += t.allocated_cost;
-    const vc = vinsOf(t);
-    if (vc){ d.vins += vc; d.costWithVins += vinBase(t).cost; }
+    if (t.vin_images || t.vins){
+      d.images += t.vin_images; d.vins += t.vins; d.costWithVins += t.allocated_cost;
+    }
     m.set(t.month_key, d);
   }
   const pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key))
     .map(d => ({...d,
-      cpi: d.priced ? d.cost/d.priced : 0,
+      cpi: d.images ? d.costWithVins/d.images : 0,
       cpv: d.vins ? d.costWithVins/d.vins : null }));
 
   el("months-label").textContent = pts.length
@@ -1420,7 +1412,7 @@ function renderKpis(T, scoped, teams){
   const cost = [
     ["Delivery cost", money(T.cost),
       `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, allocated`, true],
-    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
+    ["Cost per image", T.blended ? money(T.blended) : "—", "cost ÷ vin_images images"],
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
     ["Churned cost", money(T.churnedCost),
@@ -1439,11 +1431,10 @@ function renderKpis(T, scoped, teams){
   const namedSum = P.Images + P["360"] + P.Video;
   const otherImgs = P.total - namedSum;
   const vol = [
-    ["Total images", int(T.images),
-      otherImgs > 0 ? `${int(otherImgs)} outside the three below` : "all products", true],
-    ["Images", P.Images ? int(P.Images) : "—", shareOf(P.Images) || "images product line"],
-    ["Spins / 360", P["360"] ? int(P["360"]) : "—", shareOf(P["360"]) || "360 product line"],
-    ["Video", P.Video ? int(P.Video) : "—", shareOf(P.Video) || "video product line"],
+    ["Total images", int(T.images), "from vin_images", true],
+    ["Images", P.Images ? int(P.Images) : "—", `delivered · ${shareOf(P.Images)}`],
+    ["Spins / 360", P["360"] ? int(P["360"]) : "—", `delivered · ${shareOf(P["360"])}`],
+    ["Video", P.Video ? int(P.Video) : "—", `delivered · ${shareOf(P.Video)}`],
     ["Total VINs", T.vins ? int(T.vins) : "—", "vehicles, from vin_images"],
     ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
       "vin_images images ÷ vehicles"],
@@ -1497,26 +1488,26 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    is a per-row counter, so summing it across hourly rows and products would
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
-/* vin_images gives vehicles and their images on one row, so images per VIN is a
-   ratio within a single table. vin_images carries no product split, so the cost
-   paired with it is full delivery cost rather than the Images-only slice. */
-const vinBase = t => ({ images: t.vin_images || 0, cost: t.allocated_cost });
 
-const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
-  cost:0, vins:0, costWithVins:0, imagesWithVins:0, deliveredWithVins:0,
+
+/* images  — vin_images.image_count, the authoritative count, paired with the
+              vehicles on the same row
+   delivered — delivery_working_data, kept so the two can be compared
+   cost      — all allocated cost
+   costWithVins — only the cost of team-months that have a vin_images row, so a
+              rate never divides full cost by a partial image count */
+const blankAgg = key => ({key, ents:new Set(), roofs:new Set(),
+  images:0, delivered:0, cost:0, vins:0, costWithVins:0,
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
 function addAgg(x, t){
   x.ents.add(t.enterprise); x.roofs.add(t.team_id);
-  x.images += t.images; x.priced += t.images - t.unpriced_images;
+  x.delivered += t.images;
   x.cost += t.allocated_cost;
-  const vinCount = vinsOf(t);
-  if (vinCount){
-    const b = vinBase(t);
-    x.vins += vinCount;
-    x.costWithVins += b.cost;
-    x.imagesWithVins += b.images;        // ai_accuracy Total_Images
-    x.deliveredWithVins += t.images_acc; // delivery images, Images product
+  if (t.vin_images || t.vins){
+    x.images += t.vin_images;
+    x.vins += t.vins;
+    x.costWithVins += t.allocated_cost;
   }
   if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
   if (t.true_accuracy != null && t.acc_images){
@@ -1528,8 +1519,8 @@ function addAgg(x, t){
    ARR-covered work. Sharing one denominator would inflate whichever is thinner. */
 const deriveAgg = x => ({...x,
   ents: x.ents.size, roofs: x.roofs.size,
-  cpi: x.priced ? x.cost/x.priced : null,
-  imagesPerVin: x.vins ? x.imagesWithVins/x.vins : null,
+  cpi: x.images ? x.costWithVins/x.images : null,
+  imagesPerVin: x.vins ? x.images/x.vins : null,
   costPerVin: x.vins ? x.costWithVins/x.vins : null,
   costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
   acc: x.accDen ? x.accNum/x.accDen : null });
@@ -1649,9 +1640,9 @@ function segmentTable(teams, T){
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
   </table>
-  <div class="seghint">VINs and images per VIN come from vin_images · accuracy comes from
-    ai_accuracy, which covers ${esc(CONFIG.accuracyProduct)} only · click a segment to see
-    its rooftops</div></div>`;
+  <div class="seghint">VINs, images and every rate come from vin_images · accuracy comes from
+    ai_accuracy, which covers ${esc(CONFIG.accuracyProduct)} only · the product split below is
+    from delivery_working_data · click a segment to see its rooftops</div></div>`;
 }
 
 /* ==========================================================================
@@ -2069,6 +2060,16 @@ function coverage(){
       <ul><li>${roofs.slice(0,10).map(x =>
         `${esc(x.ent)} · ${esc(x.name)} — ${int(x.acc)} in vin_images vs ${int(x.del)} delivered`
       ).join("</li><li>")}${roofs.length>10?`</li><li>+${roofs.length-10} more`:""}</li></ul></div>`);
+  }
+
+  const vTot = S.teams.reduce((a,t) => a + (t.vin_images||0), 0);
+  const dTot = S.teams.reduce((a,t) => a + t.images, 0);
+  if (vTot && dTot && Math.abs(vTot-dTot)/dTot > 0.02){
+    chips.push(`image counts differ ${dec(Math.abs(vTot-dTot)/dTot*100,0)}% between tables`);
+    items.push(`<div class="cov-item"><b>vin_images reports ${int(vTot)} images,
+      delivery_working_data reports ${int(dTot)}.</b> Every headline figure uses vin_images.
+      The Images / Video / 360 split uses delivery_working_data, because vin_images has no
+      product column — so that split won't add up to Total images.</div>`);
   }
 
   const dupVin = S.teams.filter(t => t.vi_rows > 1);
