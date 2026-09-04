@@ -497,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v29 · 27 Aug 2026";
+const VERSION = "v30 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -538,6 +538,11 @@ const CONFIG = {
   // numerator is restricted to match. Must equal the Product value in
   // delivery_working_data, matched case-insensitively.
   accuracyProduct: "Images",
+
+  // Products delivered one per vehicle — a spin or a video is a single artefact
+  // per car, so its "image" count is really a vehicle count and cost per image
+  // would just restate cost per VIN. Those cards blank out when one is selected.
+  perVehicleProducts: ["Video", "360"],
 
   // Who may open the page. This is a courtesy check only — the real gates are
   // the Google test-user list and BigQuery IAM, both enforced server-side.
@@ -991,6 +996,7 @@ async function runQuery(){
       bq(el("sql-c").value), bq(el("sql-d").value), bq(el("sql-e").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam);
     S.excluded = c.map(normExcl); S.products = d.map(normProd);
+    invalidateProductCache();
     S.trend = e.map(o => ({ work_date:String(o.work_date||"").slice(0,10),
       product:o.product||"Unspecified",
       images:num(o.images)||0, allocated_cost:num(o.allocated_cost)||0 }));
@@ -1156,16 +1162,25 @@ function sample(){
       true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
     });
   }));
+  /* Product rows are carved out of each team-month so they sum back to it,
+     the way query D does against delivery_working_data. */
   const products = [];
-  ["Images","Video","360"].forEach((p,pi) => teams.forEach(t => {
-    if ((pi + t.team_id.length) % 3 === 0 && pi) return;   // not every rooftop sells all three
-    const share = pi === 0 ? .72 : pi === 1 ? .18 : .10;
-    products.push({month_key:t.month_key, product:p, team_id:t.team_id,
-      team_name:t.team_name, enterprise:t.enterprise,
-      images: Math.round(t.images*share),
-      unpriced_images: Math.round(t.unpriced_images*share),
-      allocated_cost: +(t.allocated_cost*share).toFixed(2)});
-  }));
+  teams.forEach(t => {
+    const mix = (t.team_id.charCodeAt(0) % 3 === 0)
+      ? [["Images", .88], ["Video", .12]]              // some rooftops skip 360
+      : [["Images", .72], ["Video", .18], ["360", .10]];
+    let imgLeft = t.images, costLeft = t.allocated_cost, unLeft = t.unpriced_images;
+    mix.forEach(([p, share], i) => {
+      const last = i === mix.length - 1;
+      const img  = last ? imgLeft  : Math.round(t.images * share);
+      const cost = last ? +costLeft.toFixed(2) : +(t.allocated_cost * share).toFixed(2);
+      const un   = last ? unLeft   : Math.round(t.unpriced_images * share);
+      imgLeft -= img; costLeft -= cost; unLeft -= un;
+      products.push({month_key:t.month_key, product:p, team_id:t.team_id,
+        team_name:t.team_name, enterprise:t.enterprise, enterprise_id:t.enterprise_id,
+        images:img, unpriced_images:un, sum_target:img, allocated_cost:cost});
+    });
+  });
 
   const trend = [];
   const allDates = [...new Set(daily.map(d => d.work_date))].sort();
@@ -1205,6 +1220,25 @@ function dailyView(){
   return S.daily.filter(r => (!f.month || r.month_key === f.month) &&
     (!f.q || r.name.toLowerCase().includes(f.q) || r.email.includes(f.q)));
 }
+/* Which products a rooftop actually delivered, from delivery_working_data —
+   arr.Products is what the account is contracted for, which is a different
+   question and was what the old filter matched on. */
+let _dpCache = null, _dpKey = "";
+function deliveredProducts(teamId, month){
+  const key = month || "*";
+  if (_dpKey !== key){
+    _dpCache = new Map();
+    for (const p of S.products){
+      if (month && p.month_key !== month) continue;
+      if (!_dpCache.has(p.team_id)) _dpCache.set(p.team_id, new Set());
+      _dpCache.get(p.team_id).add(prodLabel(p.product));
+    }
+    _dpKey = key;
+  }
+  return _dpCache.get(teamId) || new Set();
+}
+function invalidateProductCache(){ _dpKey = ""; }
+
 function teamView(){
   const f = F();
   return S.teams.filter(r =>
@@ -1214,7 +1248,7 @@ function teamView(){
     (!f.poc   || r.poc === f.poc) &&
     (!f.stage || r.stage === f.stage) &&
     (!f.ver   || r.version === f.ver) &&
-    (!f.prod  || r.products.split(", ").includes(f.prod)) &&
+    (!f.prod  || deliveredProducts(r.team_id, f.month).has(f.prod)) &&
     (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
     (!f.roof  || r.team_name.toLowerCase() === f.roof) &&
     (!f.q     || r.team_name.toLowerCase().includes(f.q)
@@ -1293,12 +1327,26 @@ function totals(pms, teams, scoped){
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
 
+  /* A product filter narrows which rooftops qualify, but the team rows still
+     carry every product those rooftops delivered. Images and cost are therefore
+     re-read from the product rows so the figures describe the product, not the
+     rooftops that happen to sell it. */
+  const prodSel = F().prod;
+  if (prodSel){
+    let pi = 0, pc = 0;
+    for (const r of productView())
+      if (prodLabel(r.product) === prodSel){ pi += r.images; pc += r.allocated_cost; }
+    images = pi; cost = pc; imagesAcc = prodSel === CONFIG.accuracyProduct ? pi : 0;
+  }
+  const perVehicle = prodSel && CONFIG.perVehicleProducts.includes(prodSel);
+
   const base = {
     vins, images, imagesAcc, vinImages, cost, costWithVins, churnedCost,
-    arrMonth, costWithArr,
-    blended:      images ? cost/images : 0,
+    arrMonth, costWithArr, product: prodSel || null, perVehicle,
+    // one artefact per car: cost per image would just restate cost per VIN
+    blended:      perVehicle ? null : (images ? cost/images : 0),
     imagesPerVin: vins ? imagesAcc/vins : null,
-    costPerVin:   vins ? costWithVins/vins : null,
+    costPerVin:   vins ? (prodSel ? cost : costWithVins)/vins : null,
     costRatio:    arrMonth ? costWithArr/arrMonth*100 : null,
     arrCoverage:  teams.length
       ? teams.filter(t => t.arr_month).length / teams.length * 100 : 0,
@@ -1353,7 +1401,7 @@ function renderScope(teams, scoped){
   if (f.dt)   bits.push(`dealer type <b>${esc(f.dt)}</b>`);
   if (f.poc)   bits.push(`POC <b>${esc(f.poc)}</b>`);
   if (f.stage) bits.push(`stage <b>${esc(f.stage)}</b>`);
-  if (f.prod)  bits.push(`product <b>${esc(f.prod)}</b>`);
+  if (f.prod)  bits.push(`product <b>${esc(f.prod)}</b> (delivered)`);
   if (f.ver)   bits.push(`version <b>${esc(f.ver)}</b>`);
   el("scope-note").innerHTML = `<div class="scoped">Scoped to ${bits.join(", ")} — `
     + `${int(new Set(teams.map(t=>t.team_id)).size)} rooftops, ${int(teams.length)} team-months. `
@@ -1363,7 +1411,10 @@ function renderScope(teams, scoped){
 function renderHero(pms, T, scoped){
   el("hero-cpi").textContent = T.blended ? money(T.blended) : "—";
   el("hero-unit").textContent = T.blended
-    ? `over ${int(T.images)} images` : "";
+    ? `over ${int(T.images)} images`
+    : T.perVehicle
+      ? `${esc(T.product)} is one per vehicle — see cost per VIN`
+      : "";
   el("hero-cpv").textContent = T.costPerVin == null ? "—" : money(T.costPerVin);
   el("hero-cpv-unit").textContent = T.costPerVin == null
     ? "no VIN counts in view"
@@ -1398,7 +1449,7 @@ function renderMonths(T){
     (!f.poc   || r.poc === f.poc) &&
     (!f.stage || r.stage === f.stage) &&
     (!f.ver   || r.version === f.ver) &&
-    (!f.prod  || r.products.split(", ").includes(f.prod)) &&
+    (!f.prod  || deliveredProducts(r.team_id, f.month).has(f.prod)) &&
     (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
     (!f.roof  || r.team_name.toLowerCase() === f.roof));
 
@@ -1519,7 +1570,8 @@ function renderKpis(T, scoped, teams){
   const cost = [
     ["Delivery cost", money(T.cost),
       `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, split by Sum_Target`, true],
-    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
+    ["Cost per image", T.blended ? money(T.blended) : "—",
+      T.perVehicle ? `${T.product} is one per vehicle` : "delivery cost ÷ images"],
 
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
@@ -2080,7 +2132,7 @@ function renderTrend(rows, teams, T, scoped){
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
   const W = svg.clientWidth || 1160, H = 340;
-  const padL = 60, padR = 58, padT = 30, padB = 46;
+  const padL = 60, padR = 58, padT = 40, padB = 46;
   const pw = W-padL-padR, plotH = H-padT-padB;
   const maxImg = Math.max(...pts.map(d => d.images)) || 1;
   const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.25) || 1;
@@ -2145,18 +2197,19 @@ function renderTrend(rows, teams, T, scoped){
       + `fill="${strong ? costColor(d.cpi/(T.blended||1)) : "var(--steel)"}">${money(d.cpi)}</text>`;
   }).join("");
 
-  /* Volume labels sit inside the top of each bar rather than above it, so they
-     never collide with the rate line — the two series share an x axis but not a
-     y scale, and the line frequently crosses where a label above the bar would go. */
+  /* Volume labels above each bar. Where the rate line runs close enough to
+     collide, the label is nudged clear rather than overlapping it. */
   const barGap = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor(pw/78))));
   s += pts.map((d,i) => {
     if (!(i % barGap === 0 || i === pts.length-1)) return "";
-    const top = yImg(d.images), hgt = padT + plotH - top;
-    const inside = hgt > 26;
-    return `<text x="${cx(i)}" y="${inside ? top+15 : top-6}" text-anchor="middle" `
+    const top = yImg(d.images);
+    const lineY = cy(d.cpi);
+    let y = top - 7;
+    if (Math.abs(lineY - y) < 13) y = lineY < top ? top + 15 : lineY - 24;
+    const inside = y > top + 4;
+    return `<text x="${cx(i)}" y="${y}" text-anchor="middle" `
       + `font-family="IBM Plex Mono" font-size="10" font-weight="500" `
-      + `fill="${inside ? "var(--card)" : "var(--steel-light)"}" `
-      + `opacity="${inside ? .95 : .8}">${int(d.images)}</text>`;
+      + `fill="${inside ? "var(--card)" : "var(--steel-light)"}">${int(d.images)}</text>`;
   }).join("");
 
   s += pts.map((d,i) => {
@@ -2424,8 +2477,9 @@ function afterLoad(source){
   fillOptions("f-poc", [...new Set(S.teams.map(t=>t.poc))].filter(Boolean).sort(), "All POCs");
   fillOptions("f-stage", [...new Set(S.teams.map(t=>t.stage))].filter(Boolean).sort(), "All stages");
   fillOptions("f-ver", [...new Set(S.teams.map(t=>t.version))].filter(Boolean).sort(), "All versions");
-  fillOptions("f-prod", [...new Set(S.teams.flatMap(t =>
-    t.products ? t.products.split(", ") : []))].filter(Boolean).sort(), "All products");
+  fillOptions("f-prod",
+    [...new Set(S.products.map(p => prodLabel(p.product)))]
+      .sort((a,b) => prodRank(a) - prodRank(b)), "All products");
   el("l-ent").innerHTML = [...new Set(S.teams.map(t=>t.enterprise))].sort()
     .map(e => `<option value="${esc(e)}">`).join("");
   fillRooftops();
