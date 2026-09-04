@@ -44,12 +44,15 @@ h1,h2{font-family:Inter,sans-serif;margin:0;font-weight:700;letter-spacing:-.02e
 .topbar{display:flex;flex-wrap:wrap;gap:14px;align-items:flex-end;justify-content:space-between;margin-bottom:12px}
 .topbar h1{font-size:26px;letter-spacing:-.01em;line-height:1.1}
 .brand{display:flex;gap:13px;align-items:flex-start}
-.mark{width:34px;height:34px;border-radius:7px;background:var(--tagbg);flex:none;
+.mark{width:34px;height:34px;border-radius:8px;background:var(--tagbg);flex:none;
   display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:8px;margin-top:3px}
+.mark.has-logo{width:auto;height:26px;background:none;padding:0;display:block;margin-top:7px}
+.mark.has-logo img{width:auto;height:26px;object-fit:contain;display:block}
+[data-theme="dark"] .mark.has-logo img{filter:invert(1) brightness(1.9)}
 .mark i{display:block;border-radius:1px;background:var(--steel-light)}
 .mark i:nth-child(1){background:var(--accent)}
 .mark i:nth-child(4){background:var(--coral)}
-.mark img{width:100%;height:100%;object-fit:contain;grid-column:1/3;grid-row:1/3}
+
 .topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
 .ver{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light);
   background:var(--tagbg);padding:1px 6px;border-radius:2px}
@@ -270,6 +273,9 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 .gate-mark i{display:block;border-radius:1px;background:#4f6478}
 .gate-mark i:nth-child(1){background:#6e1db9}
 .gate-mark i:nth-child(4){background:#ff664d}
+.gate-mark.has-logo{width:auto;height:30px;background:none;padding:0;display:block}
+.gate-mark.has-logo img{width:auto;height:30px;object-fit:contain;display:block;
+  filter:invert(1) brightness(1.9)}
 .gate-brand h1{font-family:Inter,sans-serif;font-weight:700;
   font-size:clamp(38px,6.5vw,68px);line-height:.95;letter-spacing:-.02em;color:#fff}
 .gate-brand h1 span{color:#a76ae8;display:block}
@@ -331,7 +337,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 
 <div id="gate">
   <div class="gate-brand">
-    <div class="gate-mark"><i></i><i></i><i></i><i></i></div>
+    <div class="gate-mark" id="gate-mark"><i></i><i></i><i></i><i></i></div>
     <h1>QC Cost<span>&amp; Accuracy</span></h1>
     <div class="gate-tag">What every image costs to review, which rooftops cost the most,
       and whether the expensive ones are any more accurate.</div>
@@ -467,11 +473,14 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v25 · 27 Aug 2026";
+const VERSION = "v26 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
-const LOGO_URL = "";
+/* Spyne's own wordmark, taken from their site header. It's the black lockup, so
+   the dark theme inverts it rather than loading a second asset. If the URL ever
+   moves the onerror handler drops the image and the placeholder mark remains. */
+const LOGO_URL = "https://d20uiuzezo3er4.cloudfront.net/AI-tools/ai-tool-home/HeaderNew/Spyne+Logo+black.png";
 
 /* Read off spyne.ai: #6E1DB9 is the CTA purple, #4600F2 the electric indigo it
    sits beside, #FF664D the coral accent, #F9F4FF the lavender tint. Buttons
@@ -1565,6 +1574,8 @@ const deriveAgg = x => ({...x,
   imagesPerVin: x.vins ? x.images/x.vins : null,   // delivered images / vehicles
   costPerVin: x.vins ? x.costWithVins/x.vins : null,
   costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
+  // what's left of ARR after the cost of serving it
+  margin: x.arrMonth ? (x.arrMonth - x.costWithArr)/x.arrMonth*100 : null,
   acc: x.accDen ? x.accNum/x.accDen : null });
 
 const DASH = `<span style="color:var(--steel-light)">—</span>`;
@@ -1674,12 +1685,15 @@ function segmentTable(teams, T){
       <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
       <td>${r.costPerVin == null ? DASH : money(r.costPerVin)}</td>
       <td>${r.costToServe == null ? DASH : dec(r.costToServe,1) + "%"}</td>
+      <td>${r.margin == null ? DASH
+        : `<span style="color:${r.margin < 0 ? "var(--cost-high)" : "inherit"}">`
+          + `${dec(r.margin,1)}%</span>`}</td>
       <td>${accCell(r.acc)}</td></tr>`;
 
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
       <th>Images</th><th>Images / VIN</th><th>Cost / image</th><th>Cost / VIN</th>
-      <th>Cost to serve</th><th>True accuracy</th></tr></thead>
+      <th>Cost to serve</th><th>Margin</th><th>True accuracy</th></tr></thead>
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
   </table>
@@ -1707,6 +1721,7 @@ const DRILL = {
       ["cpi",         "Cost / image",  "money"],
       ["costPerVin",  "Cost / VIN",    "money"],
       ["costToServe", "Cost to serve", "pct"],
+      ["margin",      "Margin",        "pct"],
       ["acc",         "True accuracy", "acc"]
     ],
     find: "Find rooftop\u2026",
@@ -2287,8 +2302,15 @@ el("f-fx").addEventListener("change", () => {
   render();
 });
 
-if (LOGO_URL) el("mark").innerHTML =
-  `<img src="${LOGO_URL}" alt="Spyne" onerror="this.remove()">`;
+if (LOGO_URL){
+  el("mark").classList.add("has-logo");
+  const g = el("gate-mark");
+  g.classList.add("has-logo");
+  g.innerHTML = `<img src="${LOGO_URL}" alt="Spyne" `
+    + `onerror="this.closest('.gate-mark').classList.remove('has-logo')">`;
+  el("mark").innerHTML =
+    `<img src="${LOGO_URL}" alt="Spyne" onerror="this.closest('.mark').classList.remove('has-logo')">`;
+}
 
 /* Follows the OS setting unless the person has chosen, and the choice sticks
    across reloads where the browser allows it. */
@@ -2320,6 +2342,14 @@ el("btn-clear").addEventListener("click", () => {
     .forEach(id => el(id).value = "");
   fillRooftops(); render();
 });
+
+document.querySelectorAll("#month-mode button").forEach(b =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#month-mode button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    S.monthChart = b.dataset.m;
+    render();
+  }));
 
 el("btn-csv").addEventListener("click", () => {
   const teams = teamView();
