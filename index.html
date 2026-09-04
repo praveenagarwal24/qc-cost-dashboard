@@ -853,6 +853,39 @@ async function bq(sql){
   return Object.assign(rows, { totalRows: claimed });
 }
 
+const LOAD_STEPS = [
+  ["Connecting to BigQuery…",        "authorising the session"],
+  ["Reading delivery working data…", "hourly QC rows"],
+  ["Joining salary on email + month…","monthly actuals, not a flat rate"],
+  ["Allocating cost across output…", "salary ÷ images, per person per month"],
+  ["Weighting accuracy by volume…",  "ai_accuracy on team + month"],
+  ["Rolling up rooftops…",           "almost there"]
+];
+let loadTimer = null;
+
+function startLoader(){
+  const bars = el("load-bars");
+  if (!bars.childElementCount){
+    bars.innerHTML = [0,.2,.4,.6,.8,1].map((t,i) =>
+      `<i style="height:${52+Math.sin(i)*30}px;background:${costColor(.55+t*1.35)};
+         animation-delay:${(i*0.12).toFixed(2)}s"></i>`).join("");
+  }
+  let i = 0;
+  const tick = () => {
+    el("load-msg").textContent = LOAD_STEPS[i][0];
+    el("load-sub").textContent = LOAD_STEPS[i][1];
+    i = Math.min(i + 1, LOAD_STEPS.length - 1);
+  };
+  tick();
+  clearInterval(loadTimer);
+  loadTimer = setInterval(tick, 1400);
+  el("loader").classList.add("show");
+}
+function stopLoader(){
+  clearInterval(loadTimer); loadTimer = null;
+  el("loader").classList.remove("show");
+}
+
 async function runQuery(){
   const btn = el("btn-run");
   btn.disabled = true; btn.textContent = "Loading…"; clearAlerts(); startLoader();
