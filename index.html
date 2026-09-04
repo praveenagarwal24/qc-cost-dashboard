@@ -451,7 +451,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v12 · 27 Aug 2026";
+const VERSION = "v13 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -462,11 +462,10 @@ const CONFIG = {
   dataset : "spyne_reviews",
   clientId: "108193022090-gnvo3c81ee84hq0aap1se6ffjb34v6r0.apps.googleusercontent.com",
   symbol  : "\u20B9",
-  // Cohorts. Anything on an excluded domain is dropped entirely; of what
-  // remains, inhouse domains are payroll staff and everything else is OS
-  // (outsourced). That's how the Inhouse / OS cost split is derived.
-  inhouseDomains: ["spyne.co.in"],
-  excludeDomains: ["spyne.ai"],
+  // Delivery cost counts these domains only. Every other QC email — @spyne.ai,
+  // outsourced vendors, personal addresses — is excluded from every figure on
+  // the page. Query C reports what that exclusion drops.
+  deliveryDomains: ["spyne.co.in"],
 
   // ARR lives in the `arr` table with no currency column. Delivery cost is INR
   // salary, so the two can only be compared once ARR is converted. Set this to
@@ -497,11 +496,8 @@ const CONFIG = {
    ========================================================================== */
 const like = (list) => list
   .map(d => `LOWER(TRIM(QC)) LIKE '%@${d.replace(/^@/, "")}'`).join("\n         OR ");
-const EXCLUDED = like(CONFIG.excludeDomains);
-const INHOUSE_ON = col => CONFIG.inhouseDomains
-  .map(d => `${col} LIKE '%@${d.replace(/^@/, "")}'`).join(" OR ");
-const isInhouse = email => CONFIG.inhouseDomains
-  .some(d => email.endsWith("@" + d.replace(/^@/, "")));
+const INCLUDED = like(CONFIG.deliveryDomains);
+
 
 const ACC_MONTH = `FORMAT_DATE('%Y-%m', COALESCE(
       SAFE.PARSE_DATE("%e %b, %Y", TRIM(Month)),
@@ -526,7 +522,7 @@ WITH work AS (
     IFNULL(SKU_Count, 0)                             AS sku_count
   FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
   WHERE QC IS NOT NULL AND TRIM(QC) != ''
-    AND NOT (${EXCLUDED})       -- internal @spyne.ai staff aren't delivery cost
+    AND (${INCLUDED})           -- delivery cost is @spyne.co.in work only
 ),
 salary_raw AS (
   SELECT
@@ -558,7 +554,6 @@ pm AS (
     COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
     s.emp_no                                                  AS emp_no,
     IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
-    IF(${INHOUSE_ON("v.qc_email")}, 'inhouse', 'os')          AS cohort,
     SAFE_DIVIDE(s.salary, NULLIF(v.month_images, 0))          AS rate
   FROM pm_volume v
   LEFT JOIN sal_email s
@@ -624,14 +619,10 @@ team AS (
     ANY_VALUE(w.Team_Name)      AS team_name,
     ANY_VALUE(w.dealer_type)    AS dealer_type,
     COUNT(DISTINCT w.qc_email)  AS people,
-    COUNT(DISTINCT IF(pm.cohort = 'inhouse', w.qc_email, NULL)) AS people_inhouse,
-    COUNT(DISTINCT IF(pm.cohort = 'os',      w.qc_email, NULL)) AS people_os,
     -- the actual reviewers, so a filtered headcount can be a true distinct count
     -- rather than a sum of per-rooftop counts that double-counts shared staff
     STRING_AGG(DISTINCT w.qc_email, '|') AS reviewers,
     SUM(w.images)               AS images,
-    SUM(IF(pm.cohort = 'inhouse', w.images, 0))   AS images_inhouse,
-    SUM(IF(pm.cohort = 'os',      w.images, 0))   AS images_os,
     SUM(w.sku_count)                              AS sku_count,
     -- ai_accuracy is Images-only, so VIN rates need an Images-only numerator
     SUM(IF(LOWER(TRIM(w.Product)) = LOWER('${CONFIG.accuracyProduct}'), w.images, 0))
@@ -640,8 +631,6 @@ team AS (
       w.images * IFNULL(pm.rate, 0), 0)), 2)      AS cost_acc,
     SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
     ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost,
-    ROUND(SUM(IF(pm.cohort = 'inhouse', w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_inhouse,
-    ROUND(SUM(IF(pm.cohort = 'os',      w.images * IFNULL(pm.rate, 0), 0)), 2) AS cost_os,
     -- hours attributed the same way cost is: share of the person's monthly output
     ROUND(SUM(w.images * SAFE_DIVIDE(pm.month_hours, pm.month_images)), 2) AS hours_attributed
   FROM work w
@@ -650,10 +639,10 @@ team AS (
 )
 SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
-  t.people, t.people_inhouse, t.people_os, t.reviewers,
-  t.images, t.images_inhouse, t.images_os, t.unpriced_images, t.sku_count,
+  t.people, t.reviewers,
+  t.images, t.unpriced_images, t.sku_count,
   t.images_acc, t.cost_acc,
-  t.allocated_cost, t.cost_inhouse, t.cost_os, t.hours_attributed,
+  t.allocated_cost, t.hours_attributed,
   a.segment, a.poc, a.vins, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
   r.stage, r.contracted_arr, r.live_arr, r.products, r.version, r.arr_rows
@@ -692,7 +681,7 @@ SELECT
   COUNT(DISTINCT Hourly_Date)                 AS hours
 FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
 WHERE QC IS NOT NULL AND TRIM(QC) != ''
-  AND (${EXCLUDED})
+  AND NOT (${INCLUDED})
 GROUP BY month_key, email
 ORDER BY images DESC
 LIMIT 500`;
@@ -886,7 +875,6 @@ const num = v => v == null || v === "" ? null : Number(v);
 const normDaily = o => ({
   month_key:o.month_key||"", email:(o.email||"").toLowerCase(),
   name:o.name || (o.email||"").split("@")[0], emp_no:o.emp_no||"",
-  cohort: isInhouse((o.email||"").toLowerCase()) ? "inhouse" : "os",
   match_type:o.match_type||"none", work_date:String(o.work_date||"").slice(0,10),
   hours:num(o.hours)||0, images:num(o.images)||0,
   tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
@@ -899,15 +887,12 @@ const normTeam = o => ({
   enterprise_id:o.enterprise_id||"", dealer_type:o.dealer_type||"UNKNOWN",
   segment:o.segment||"", poc:o.poc||"",
   people:num(o.people)||0,
-  people_inhouse:num(o.people_inhouse)||0, people_os:num(o.people_os)||0,
   reviewers: o.reviewers ? o.reviewers.split("|").filter(Boolean) : [],
   images:num(o.images)||0,
-  images_inhouse:num(o.images_inhouse)||0, images_os:num(o.images_os)||0,
   sku_count:num(o.sku_count)||0,
   images_acc:num(o.images_acc)||0, cost_acc:num(o.cost_acc)||0,
   unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
-  cost_inhouse:num(o.cost_inhouse)||0, cost_os:num(o.cost_os)||0,
   hours_attributed:num(o.hours_attributed)||0,
   vins:num(o.vins), acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
   stage:o.stage||"", version:o.version||"", products:o.products||"",
@@ -954,8 +939,7 @@ function sample(){
     ["Chhotu Singh","chhotu.singh@spyne.co.in","E6650"],["Pradeep Singh","pradeep.singh@spyne.co.in","E6661"],
     ["Rambha Prajapati","rambha.prajapati@spyne.co.in","E6670"],["Kavi Singh","kavi.singh@spyne.co.in","E6682"],
     ["Samir Ansari","samir.ansari@spyne.co.in","E6690"],["Lalit Shukla","lalit.shukla@spyne.co.in","E6701"],
-    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"],
-    ["Bestakki Kumar","bestakkikumar@gmail.com",""],["Vendor Two","vendor.two@partner.co","" ]
+    ["Mohit Sharma","mohit.sharma1@spyne.co.in","E6712"],["Ankul Kumar","ankul.kumar@spyne.co.in","E6580"]
   ];
   const roofs = [
     ["Bentley Tampa Bay","11df1566a","dimmitt automotive","9dd9791eb","FRANCHISE","Ent","Unassigned"],
@@ -1041,7 +1025,7 @@ function sample(){
   }));
 
   const excluded = [];
-  ["raj.tripathi@spyne.ai","kishor@spyne.ai","abhinav.sinha@spyne.ai"].forEach((e,i) =>
+  ["raj.tripathi@spyne.ai","kishor@spyne.ai","bestakkikumar@gmail.com"].forEach((e,i) =>
     months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
   return {daily, teams, excluded, products};
 }
@@ -1089,7 +1073,7 @@ function byPersonMonth(rows){
     const k = r.email + "|" + r.month_key;
     let p = m.get(k);
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
-      match_type:r.match_type, cohort:r.cohort, salary:r.month_salary,
+      match_type:r.match_type, salary:r.month_salary,
       images:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
     p.images += r.images; p.hours += r.hours; p.days += 1;
     if (r.allocated_cost != null) p.cost += r.allocated_cost;
@@ -1167,28 +1151,16 @@ function totals(pms, teams, scoped){
     const hours = sum("hours_attributed");
     const who = new Set();
     for (const t of teams) for (const e of t.reviewers) who.add(e);
-    const inh = [...who].filter(isInhouse).length;
     return {...base, cost, pricedImages:priced,
-      costInhouse: sum("cost_inhouse"), costOs: sum("cost_os"),
-      imagesInhouse: sum("images_inhouse"), imagesOs: sum("images_os"),
-      images: sum("images"), hours,
-      heads: who.size, headsInhouse: inh, headsOs: who.size - inh,
+      images: sum("images"), hours, heads: who.size,
       blended: priced ? cost/priced : 0 };
   }
   const cost = pms.reduce((a,p) => a + p.cost, 0);
   const priced = pms.filter(p => p.cpi != null).reduce((a,p) => a + p.images, 0);
-  const inh = pms.filter(p => p.cohort === "inhouse");
-  const os  = pms.filter(p => p.cohort === "os");
   return {...base, cost, pricedImages:priced,
-    costInhouse: inh.reduce((a,p) => a + p.cost, 0),
-    costOs:      os.reduce((a,p) => a + p.cost, 0),
-    imagesInhouse: inh.reduce((a,p) => a + p.images, 0),
-    imagesOs:      os.reduce((a,p) => a + p.images, 0),
     images: pms.reduce((a,p) => a + p.images, 0),
     hours: pms.reduce((a,p) => a + p.hours, 0),
     heads: new Set(pms.map(p => p.email)).size,
-    headsInhouse: new Set(inh.map(p => p.email)).size,
-    headsOs: new Set(os.map(p => p.email)).size,
     blended: priced ? cost/priced : 0 };
 }
 
@@ -1391,24 +1363,22 @@ function renderKpis(T, scoped, teams){
 
   // three groups of exactly four, so no row is left half-empty
   const cost = [
-    ["Delivery cost", money(T.cost), "inhouse + OS, allocated", true],
-    ["Inhouse cost", money(T.costInhouse),
-      `${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} · ${pctOf(T.costInhouse)}`],
-    ["OS cost", money(T.costOs),
-      T.costOs ? `outsourced · ${pctOf(T.costOs)}` : "outsourced · no salary rows"],
+    ["Delivery cost", money(T.cost),
+      `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, allocated`, true],
+    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
+    ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
+      T.costPerVin == null ? "needs VIN counts"
+        : (CONFIG.vinSource === "sku" ? "all products" : CONFIG.accuracyProduct + " work only")],
     ["Churned cost", money(T.churnedCost),
       T.churnedCost ? `on churned rooftops · ${pctOf(T.churnedCost)}` : "on churned rooftops"]
   ];
   const unit = [
-    ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images", true],
-    ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
-      T.costPerVin == null ? "needs VIN counts"
-        : (CONFIG.vinSource === "sku" ? "all products" : CONFIG.accuracyProduct + " work only")],
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
-      `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`],
+      `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
-      T.costRatio == null ? "needs ARR"
-        : `of ARR · over ${dec(T.arrCoverage,0)}% of rooftops`]
+      T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
+    ["ARR coverage", dec(T.arrCoverage,0) + "%", "rooftops with an ARR row"],
+    ["True accuracy", pct(T.accuracy), `image-weighted · ${CONFIG.accuracyProduct} only`]
   ];
   const vol = [
     ["Total images", int(T.images), "delivered in view", true],
@@ -1423,7 +1393,7 @@ function renderKpis(T, scoped, teams){
   el("kpis").innerHTML =
     `<div class="kpi-group"><div class="kpi-label">Cost</div>
        <div class="kpis">${cards(cost)}</div></div>
-     <div class="kpi-group"><div class="kpi-label">Unit economics</div>
+     <div class="kpi-group"><div class="kpi-label">Revenue and quality</div>
        <div class="kpis">${cards(unit)}</div></div>
      <div class="kpi-group"><div class="kpi-label">Volume</div>
        <div class="kpis">${cards(vol)}</div></div>
@@ -1987,11 +1957,11 @@ function coverage(){
   if (S.excluded.length){
     const who = [...new Set(S.excluded.map(e => e.email))];
     const imgs = S.excluded.reduce((a,e) => a + e.images, 0);
-    chips.push(`${who.length} internal emails excluded`);
-    items.push(`<div class="cov-item"><b>${who.length} internal emails excluded,
-      ${int(imgs)} images.</b> Anyone on ${CONFIG.excludeDomains.map(d=>"@"+d).join(", ")} is
-      treated as internal staff rather than delivery cost. Everyone else counts:
-      ${CONFIG.inhouseDomains.map(d=>"@"+d).join(", ")} as inhouse, all other domains as OS.
+    chips.push(`${who.length} emails outside delivery`);
+    items.push(`<div class="cov-item"><b>${who.length} QC emails excluded, ${int(imgs)} images.</b>
+      Delivery cost counts ${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} only, so @spyne.ai
+      staff, outsourced vendors and personal addresses are outside every figure on this page —
+      their images as well as their cost.
       <ul><li>${who.slice(0,15).map(esc).join("</li><li>")}</li></ul></div>`);
   }
   el("coverage").innerHTML = items.length
