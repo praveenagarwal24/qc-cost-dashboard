@@ -460,7 +460,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v18 · 27 Aug 2026";
+const VERSION = "v19 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -588,11 +588,6 @@ acc AS (
     LOWER(TRIM(Team_ID))                                               AS team_id,
     ANY_VALUE(Customer_Segment)                                        AS segment,
     ANY_VALUE(POC)                                                     AS poc,
-    -- ai_accuracy splits a team-month across Image_Category, and VINs repeats
-    -- the vehicle count on each of those rows (38/38/38/20 for one rooftop).
-    -- SUM would multiply it fourfold, so the categories are collapsed with MAX,
-    -- which is the largest category's vehicle count for that team-month.
-    MAX(VINs)                                                          AS vins,
     COUNT(*)                                                           AS acc_rows,
     SUM(Total_Images)                                                  AS acc_images,
     SAFE_DIVIDE(SUM(true_accuracy * Total_Images), SUM(Total_Images))  AS true_accuracy
@@ -618,6 +613,20 @@ arr AS (
   FROM \`${CONFIG.project}.${CONFIG.dataset}.arr\`
   WHERE \`Team ID\` IS NOT NULL AND TRIM(\`Team ID\`) != ''
   GROUP BY team_id
+),
+vin AS (
+  -- vin_images carries the vehicle count and its image count on the same row,
+  -- one row per month x team, so no category collapse is needed and the two
+  -- numbers are internally consistent. vi_rows exposes any duplicate keys.
+  SELECT
+    FORMAT_DATE('%Y-%m', month)   AS month_key,
+    LOWER(TRIM(team_id))          AS team_id,
+    SUM(sku_count)                AS vins,
+    SUM(image_count)              AS vin_images,
+    COUNT(*)                      AS vi_rows
+  FROM \`${CONFIG.project}.${CONFIG.dataset}.vin_images\`
+  WHERE team_id IS NOT NULL AND TRIM(team_id) != '' AND month IS NOT NULL
+  GROUP BY month_key, team_id
 ),
 team AS (
   SELECT
@@ -650,13 +659,17 @@ SELECT
   t.images, t.unpriced_images,
   t.images_acc, t.cost_acc,
   t.allocated_cost, t.hours_attributed,
-  a.segment, a.poc, a.vins, a.acc_rows, a.acc_images,
+  a.segment, a.poc, a.acc_rows, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
+  v.vins, v.vin_images, v.vi_rows,
   r.stage, r.contracted_arr, r.live_arr, r.products, r.version, r.arr_rows
 FROM team t
 LEFT JOIN acc a
   ON  a.month_key = t.month_key
   AND a.team_id   = t.team_id
+LEFT JOIN vin v            -- vehicle and image counts, month + team
+  ON  v.month_key = t.month_key
+  AND v.team_id   = t.team_id
 LEFT JOIN arr r            -- no month column: a snapshot, joined on team alone
   ON  r.team_id = t.team_id
 ORDER BY t.images DESC`;
@@ -927,7 +940,8 @@ const normTeam = o => ({
   unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
   hours_attributed:num(o.hours_attributed)||0,
-  vins:num(o.vins), acc_rows:num(o.acc_rows)||0, acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
+  vins:num(o.vins), vin_images:num(o.vin_images)||0, vi_rows:num(o.vi_rows)||0,
+  acc_rows:num(o.acc_rows)||0, acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
   stage:o.stage||"", version:o.version||"", products:o.products||"",
   arr_rows:num(o.arr_rows)||0,
   contracted_arr:num(o.contracted_arr), live_arr:num(o.live_arr),
@@ -1041,7 +1055,9 @@ function sample(){
       arr_rows: 1,
       contracted_arr: ri===6 ? null : 4800 + ((ri*13)%9)*3600,
       live_arr: null,
-      vins: hasAcc ? 12+((ri*5+mi*3)%46) : null,
+      vins: 40 + ((ri*7+mi*5)%38),
+      vin_images: (40 + ((ri*7+mi*5)%38)) * (24 + (ri%9)),
+      vi_rows: 1,
       acc_images: hasAcc ? Math.round(images*0.42) : null,
       true_accuracy: hasAcc ? +(96 - ((ri*13+mi*7)%100)/100*26).toFixed(2) : null
     });
@@ -1251,7 +1267,7 @@ function renderHero(pms, T, scoped){
   el("hero-cpv").textContent = T.costPerVin == null ? "—" : money(T.costPerVin);
   el("hero-cpv-unit").textContent = T.costPerVin == null
     ? "no VIN counts in view"
-    : `over ${int(T.vins)} VINs · ${CONFIG.accuracyProduct} only`;
+    : `over ${int(T.vins)} VINs · from vin_images`;
   renderMonths(T);
 }
 
@@ -1388,7 +1404,7 @@ function renderMonths(T){
   if (hasVin)
     s += `<rect x="98" y="4" width="11" height="9" rx="2" fill="var(--steel)" opacity=".55"/>`
        + `<text x="114" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN`
-       + ` (${esc(CONFIG.accuracyProduct)})</text>`;
+       + `</text>`;
 
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("height", H);
@@ -1406,8 +1422,7 @@ function renderKpis(T, scoped, teams){
       `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, allocated`, true],
     ["Cost per image", T.blended ? money(T.blended) : "—", "delivery cost ÷ images"],
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
-      T.costPerVin == null ? "needs VIN counts"
-        : CONFIG.accuracyProduct + " work only"],
+      T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
     ["Churned cost", money(T.churnedCost),
       T.churnedCost ? `on churned rooftops · ${pctOf(T.churnedCost)}` : "on churned rooftops"]
   ];
@@ -1429,9 +1444,9 @@ function renderKpis(T, scoped, teams){
     ["Images", P.Images ? int(P.Images) : "—", shareOf(P.Images) || "images product line"],
     ["Spins / 360", P["360"] ? int(P["360"]) : "—", shareOf(P["360"]) || "360 product line"],
     ["Video", P.Video ? int(P.Video) : "—", shareOf(P.Video) || "video product line"],
-    ["Total VINs", T.vins ? int(T.vins) : "—", "from ai_accuracy"],
+    ["Total VINs", T.vins ? int(T.vins) : "—", "vehicles, from vin_images"],
     ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
-      "ai_accuracy images ÷ VINs"],
+      "vin_images images ÷ vehicles"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
   ];
@@ -1482,13 +1497,10 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    is a per-row counter, so summing it across hourly rows and products would
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
-/* Cost only exists in delivery_working_data, so cost per VIN has to cross the
-   two tables — restricted to the Images product, since that's all ai_accuracy
-   covers. Images per VIN does NOT need to cross them: ai_accuracy carries its
-   own Total_Images against those same VINs, and that pairing is internally
-   consistent. Using delivery images against ai_accuracy VINs mixed a numerator
-   and denominator measuring different things. */
-const vinBase = t => ({ images: t.acc_images || 0, cost: t.cost_acc });
+/* vin_images gives vehicles and their images on one row, so images per VIN is a
+   ratio within a single table. vin_images carries no product split, so the cost
+   paired with it is full delivery cost rather than the Images-only slice. */
+const vinBase = t => ({ images: t.vin_images || 0, cost: t.allocated_cost });
 
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(), images:0, priced:0,
   cost:0, vins:0, costWithVins:0, imagesWithVins:0, deliveredWithVins:0,
@@ -1637,9 +1649,9 @@ function segmentTable(teams, T){
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
   </table>
-  <div class="seghint">VINs, cost per VIN and accuracy come from ai_accuracy, which covers
-    ${esc(CONFIG.accuracyProduct)} only — Video and 360 are excluded from those three columns
-    but included in cost per image · click a segment to see its rooftops</div></div>`;
+  <div class="seghint">VINs and images per VIN come from vin_images · accuracy comes from
+    ai_accuracy, which covers ${esc(CONFIG.accuracyProduct)} only · click a segment to see
+    its rooftops</div></div>`;
 }
 
 /* ==========================================================================
@@ -2042,32 +2054,41 @@ function coverage(){
      disagree sharply, any ratio spanning the two tables is unreliable for that
      rooftop — name them instead of letting one odd row look like a real finding. */
   const skew = S.teams
-    .filter(t => t.vins && t.acc_images && t.images_acc)
-    .map(t => ({name:t.team_name, ent:t.enterprise, m:t.month_key,
-                acc:t.acc_images, del:t.images_acc,
-                ratio: t.acc_images / t.images_acc }))
+    .filter(t => t.vins && t.vin_images && t.images)
+    .map(t => ({name:t.team_name, ent:t.enterprise,
+                acc:t.vin_images, del:t.images,
+                ratio: t.vin_images / t.images }))
     .filter(x => x.ratio < 0.34 || x.ratio > 3);
   if (skew.length){
     const roofs = [...new Map(skew.map(x => [x.name, x])).values()];
     chips.push(`${roofs.length} rooftop${roofs.length>1?"s":""} where the two tables disagree`);
     items.push(`<div class="cov-item"><b>${roofs.length} rooftops report very different image
-      counts in ai_accuracy and delivery_working_data.</b> Images per VIN and cost per VIN cross
-      those two tables, so both are unreliable for these. Usually it means accuracy sampling covers
-      a fraction of what was delivered, or the Team_ID maps to different work on each side.
+      counts in vin_images and delivery_working_data.</b> Cost per VIN divides delivery cost by
+      vin_images vehicles, so it is unreliable for these. Usually it means the two tables cover
+      different scopes, or Team_ID maps to different work on each side.
       <ul><li>${roofs.slice(0,10).map(x =>
-        `${esc(x.ent)} · ${esc(x.name)} — ${int(x.acc)} accuracy vs ${int(x.del)} delivered`
+        `${esc(x.ent)} · ${esc(x.name)} — ${int(x.acc)} in vin_images vs ${int(x.del)} delivered`
       ).join("</li><li>")}${roofs.length>10?`</li><li>+${roofs.length-10} more`:""}</li></ul></div>`);
   }
 
-  const multi = S.teams.filter(t => t.acc_rows > 1);
-  if (multi.length){
-    const cats = Math.round(multi.reduce((a,t) => a + t.acc_rows, 0) / multi.length);
-    chips.push(`VINs de-duplicated across ${cats} categories`);
-    items.push(`<div class="cov-item"><b>ai_accuracy splits each team-month across Image_Category
-      — about ${cats} rows per rooftop-month.</b> VINs repeats the same vehicle count on every one
-      of those rows, so summing would multiply it. The categories are collapsed with MAX, giving
-      the largest category's vehicle count. That is a floor rather than an exact figure: if some
-      vehicles have exterior shots but no interior, the true count sits slightly above it.</div>`);
+  const dupVin = S.teams.filter(t => t.vi_rows > 1);
+  if (dupVin.length){
+    chips.push(`${dupVin.length} duplicate vin_images keys`);
+    items.push(`<div class="cov-item"><b>${dupVin.length} team-months appear more than once in
+      vin_images.</b> The duplicates are summed, so vehicle counts for those rooftops may be
+      inflated. vin_images is expected to hold one row per month and team.</div>`);
+  }
+
+  const noVin = S.teams.filter(t => !t.vins);
+  if (noVin.length){
+    const lost = noVin.reduce((a,t) => a + t.images, 0);
+    const all = S.teams.reduce((a,t) => a + t.images, 0) || 1;
+    const roofs = [...new Set(noVin.map(t => t.team_name))];
+    chips.push(`${dec(noVin.length/Math.max(1,S.teams.length)*100,0)}% team-months without VINs`);
+    items.push(`<div class="cov-item"><b>${noVin.length} team-months have delivery data but no
+      vin_images row.</b> ${int(lost)} images (${dec(lost/all*100,1)}%) sit outside every VIN
+      figure, though their cost still counts toward delivery cost and cost per image.
+      <ul><li>${roofs.slice(0,12).map(esc).join("</li><li>")}${roofs.length>12?`</li><li>+${roofs.length-12} more`:""}</li></ul></div>`);
   }
 
   const noArr = S.teams.filter(t => !t.contracted_arr);
