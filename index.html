@@ -497,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v30 · 27 Aug 2026";
+const VERSION = "v31 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1150,8 +1150,8 @@ function sample(){
                  "rafil.khan@spyne.co.in","bestakkikumar@gmail.com"].slice(0, 2+(ri%3)),
       stage: ["Live","Live","Live","Onboarding","Churned"][ri%5],
       version: ri%3 ? "v2" : "v1",
-      products: [["image","inventory"],["threeSixty","image","inventory"],
-                 ["inventory"],["image","video","advanceTools"]][ri%4].join(", "),
+      products: [["image","video","threeSixty"],["image","video"],
+                 ["image"],["image","video","threeSixty","inventory","website"]][ri%4].join(", "),
       arr_rows: 1,
       contracted_arr: ri===6 ? null : 4800 + ((ri*13)%9)*3600,
       live_arr: null,
@@ -1297,7 +1297,8 @@ function rollTeams(rows, keyFn, labelFn){
     }
     x.vins += vinsOf(r);
     if (r.stage) x.stages.add(r.stage);
-    if (r.arr_month){ x.arrMonth += r.arr_month; x.costWithArr += r.allocated_cost; }
+    const share = arrShare(r, F().prod || null);
+    if (share){ x.arrMonth += share; x.costWithArr += r.allocated_cost; }
   }
   return [...m.values()].map(x => ({...x,
     rooftops: x.rooftops.size, months: x.months.size,
@@ -1323,7 +1324,8 @@ function totals(pms, teams, scoped){
     if (t.vin_images || t.vins){
       vins += t.vins; vinImages += t.vin_images; costWithVins += t.allocated_cost;
     }
-    if (t.arr_month){ arrMonth += t.arr_month; costWithArr += t.allocated_cost; }
+    const share = arrShare(t, F().prod || null);
+    if (share){ arrMonth += share; costWithArr += t.allocated_cost; }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
 
@@ -1352,7 +1354,9 @@ function totals(pms, teams, scoped){
       ? teams.filter(t => t.arr_month).length / teams.length * 100 : 0,
     vinCoverage:  teams.length
       ? teams.filter(t => t.vin_images || t.vins).length / teams.length * 100 : 0,
-    accuracy: weightedAccuracy(teams),
+    // ai_accuracy covers Images only, so under a per-vehicle product it would be
+    // reporting a different product's quality against this one's volume
+    accuracy: perVehicle ? null : weightedAccuracy(teams),
     accounts: new Set(teams.map(t => t.enterprise)).size,
     rooftops: new Set(teams.map(t => t.team_id)).size
   };
@@ -1580,25 +1584,33 @@ function renderKpis(T, scoped, teams){
   ];
   const unit = [
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
-      `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
+      T.product ? `${T.product} share · ARR split per product`
+        : `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
       T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
     ["ARR coverage", dec(T.arrCoverage,0) + "%", "rooftops with an ARR row"],
-    ["True accuracy", pct(T.accuracy), `image-weighted · ${CONFIG.accuracyProduct} only`]
+    ["True accuracy", pct(T.accuracy),
+      T.perVehicle ? `not reported for ${T.product}`
+        : `image-weighted · ${CONFIG.accuracyProduct} only`]
   ];
   const P = productTotals();
   const shareOf = n => P.total ? dec(n/P.total*100,1) + "% of images" : "";
-  const namedSum = P.Images + P["360"] + P.Video;
-  const otherImgs = P.total - namedSum;
+  /* With a product selected the other two aren't part of the view, so they show
+     a dash rather than a number the filter didn't apply to. */
+  const sel = T.product;
+  const pv = (label, key) => sel && sel !== label
+    ? ["—", `not in ${sel} view`]
+    : [P[key] ? int(P[key]) : "—", `delivered · ${shareOf(P[key])}`];
   const vol = [
-    ["Images", P.Images ? int(P.Images) : "—", `delivered · ${shareOf(P.Images)}`, true],
-    ["Spins / 360", P["360"] ? int(P["360"]) : "—", `delivered · ${shareOf(P["360"])}`],
-    ["Video", P.Video ? int(P.Video) : "—", `delivered · ${shareOf(P.Video)}`],
+    ["Images", ...pv("Images", "Images"), true],
+    ["Spins / 360", ...pv("360", "360")],
+    ["Video", ...pv("Video", "Video")],
     ["Total VINs", T.vins ? int(T.vins) : "—", "vehicles, from vin_images"],
-    // the divisor is spelled out, since the images total is no longer its own card
-    ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
-      T.imagesAcc && T.vins
-        ? `${int(T.imagesAcc)} ÷ ${int(T.vins)}` : `${CONFIG.accuracyProduct} ÷ vehicles`],
+    ["Images per VIN",
+      T.perVehicle || T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
+      T.perVehicle ? `${sel} is one per vehicle`
+        : T.imagesAcc && T.vins
+          ? `${int(T.imagesAcc)} ÷ ${int(T.vins)}` : `${CONFIG.accuracyProduct} ÷ vehicles`],
     ["VIN coverage", dec(T.vinCoverage, 0) + "%", "team-months with a vin_images row"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
@@ -1651,6 +1663,24 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
 
+/* ARR is contracted per account, not per product, and arr.Products lists what
+   the account bought — ['image','video','threeSixty'] and so on. Only those
+   three map to something delivered; inventory, website and advanceTools are
+   other lines of business, so they're excluded rather than diluting the split.
+   ARR is then divided evenly across whichever of the three an account holds. */
+const ARR_PRODUCTS = ["Images", "Video", "360"];
+function arrProductsOf(t){
+  return [...new Set((t.products || "").split(", ")
+    .map(s => s.trim()).filter(Boolean).map(prodLabel))]
+    .filter(p => ARR_PRODUCTS.includes(p));
+}
+function arrShare(t, product){
+  if (!t.arr_month) return 0;
+  const list = arrProductsOf(t);
+  if (!product) return list.length ? t.arr_month : 0;
+  return list.includes(product) ? t.arr_month / list.length : 0;
+}
+
 
 /* images  — delivery_working_data, the same count the product split adds up to,
               so every image figure on the page reconciles with every other
@@ -1671,7 +1701,8 @@ function addAgg(x, t){
     x.vins += t.vins;
     x.costWithVins += t.allocated_cost;
   }
-  if (t.arr_month){ x.arrMonth += t.arr_month; x.costWithArr += t.allocated_cost; }
+  const share = arrShare(t, F().prod || null);
+  if (share){ x.arrMonth += share; x.costWithArr += t.allocated_cost; }
   if (t.true_accuracy != null && t.acc_images){
     x.accNum += t.true_accuracy * t.acc_images; x.accDen += t.acc_images;
   }
@@ -1693,6 +1724,8 @@ const deriveAgg = x => ({...x,
   acc: x.accDen ? x.accNum/x.accDen : null });
 
 const DASH = `<span style="color:var(--steel-light)">—</span>`;
+// ai_accuracy is Images-only, so accuracy columns blank out under Video or 360
+const perVehicleView = () => CONFIG.perVehicleProducts.includes(F().prod);
 const accCell = a => a == null ? DASH
   : `<span class="accbar" style="width:${Math.round(a/2.4)}px"></span>${pct(a)}`;
 
@@ -1801,7 +1834,7 @@ function segmentTable(teams, T){
       <td>${r.margin == null ? DASH
         : `<span style="color:${r.margin < 0 ? "var(--cost-high)" : "inherit"}">`
           + `${dec(r.margin,1)}%</span>`}</td>
-      <td>${accCell(r.acc)}</td></tr>`;
+      <td>${perVehicleView() ? DASH : accCell(r.acc)}</td></tr>`;
 
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
