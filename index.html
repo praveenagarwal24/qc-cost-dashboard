@@ -15,7 +15,7 @@
   --ink:#131b2b; --steel:#5a6880; --steel-light:#939fb3;
   --paper:#eff2f7; --card:#fff; --rule:#dce1ea; --rule-soft:#ebeef4;
   --hover:#f4f7fc; --field:#fff; --tagbg:#e9edf5;
-  --accent:#2f5fd8; --accent-soft:#eaf0ff;
+  --accent:#5b3df5; --accent-soft:#efecff;
   --cost-low:#0f8f6a; --cost-mid:#c8951c; --cost-high:#cf3c53;
   --shadow:0 16px 44px rgba(19,27,43,.18);
   --pad:20px; --radius:4px;
@@ -24,7 +24,7 @@
   --ink:#e8ecf4; --steel:#94a2ba; --steel-light:#65728a;
   --paper:#0c1017; --card:#151c27; --rule:#293344; --rule-soft:#1e2632;
   --hover:#1c2531; --field:#101722; --tagbg:#1f2938;
-  --accent:#7d9bff; --accent-soft:#1a2440;
+  --accent:#8f7bff; --accent-soft:#211c3d;
   --cost-low:#23bd8c; --cost-mid:#e2ad3d; --cost-high:#f0687c;
   --shadow:0 16px 44px rgba(0,0,0,.55);
 }
@@ -61,7 +61,8 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .filterbar .lab{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:10px;
   letter-spacing:.12em;text-transform:uppercase;color:var(--steel-light);margin-right:2px}
 .filterbar .div{width:1px;height:20px;background:var(--rule);margin:0 5px}
-select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--field);
+#f-fx{font-family:"IBM Plex Mono",monospace}
+select,input[type=text],input[type=number]{font:inherit;font-size:13px;color:var(--ink);background:var(--field);
   border:1px solid var(--rule);border-radius:var(--radius);padding:6px 8px;max-width:210px}
 select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
 select.on,input.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
@@ -387,6 +388,9 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <select id="f-dt"><option value="">All dealer types</option></select>
     <select id="f-poc"><option value="">All POCs</option></select>
     <span class="div"></span>
+    <span class="lab">USD → INR</span>
+    <input type="number" id="f-fx" min="1" max="500" step="0.5" style="width:74px">
+    <span class="div"></span>
     <span class="lab">Commercial</span>
     <select id="f-stage"><option value="">All stages</option></select>
     <select id="f-prod"><option value="">All products</option></select>
@@ -463,11 +467,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v22 · 27 Aug 2026";
+const VERSION = "v24 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
 const LOGO_URL = "";
+
+/* Spyne's brand colour. I couldn't read it off spyne.ai, so this is a stand-in —
+   replace it with the exact hex and both themes follow. */
+const BRAND = { light: "#5b3df5", dark: "#8f7bff" };
 
 const CONFIG = {
   project : "inspired-frame-453018-r2",
@@ -478,6 +486,12 @@ const CONFIG = {
   // outsourced vendors, personal addresses — is excluded from every figure on
   // the page. Query C reports what that exclusion drops.
   deliveryDomains: ["spyne.co.in"],
+
+  // How to collapse a person with more than one salary row in the same month.
+  // "sum" treats them as separate pay lines; "max" treats the extra rows as
+  // duplicates and keeps the largest. A duplicate under "sum" inflates that
+  // month's delivery cost by the whole extra amount.
+  duplicatePay: "sum",
 
   // ARR lives in the `arr` table with no currency column. Delivery cost is INR
   // salary, so the two can only be compared once ARR is converted. Set this to
@@ -545,7 +559,11 @@ salary_raw AS (
 ),
 sal_email AS (
   SELECT month_key, email,
-         ANY_VALUE(name) AS name, ANY_VALUE(emp_no) AS emp_no, SUM(salary) AS salary
+         ANY_VALUE(name) AS name, ANY_VALUE(emp_no) AS emp_no,
+         COUNT(*)        AS pay_rows,
+         SUM(salary)     AS salary_sum,
+         MAX(salary)     AS salary_max,
+         ${CONFIG.duplicatePay === "max" ? "MAX(salary)" : "SUM(salary)"} AS salary
   FROM salary_raw GROUP BY month_key, email
 ),
 pm_volume AS (
@@ -559,6 +577,8 @@ pm AS (
   SELECT
     v.qc_email, v.month_key, v.month_images, v.month_target, v.month_hours,
     s.salary                                                  AS month_salary,
+    s.pay_rows                                                AS pay_rows,
+    s.salary_sum - s.salary_max                               AS pay_inflation,
     COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
     s.emp_no                                                  AS emp_no,
     IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
@@ -584,7 +604,8 @@ SELECT
   d.month_key, d.qc_email AS email, pm.name, pm.emp_no, pm.match_type,
   CAST(d.work_date AS STRING) AS work_date,
   d.hours, d.images, d.sum_target, d.tool_count, d.sku_count,
-  pm.month_salary, pm.month_images, pm.month_target, pm.month_hours,
+  pm.month_salary, pm.pay_rows, pm.pay_inflation,
+  pm.month_images, pm.month_target, pm.month_hours,
   ROUND(d.sum_target * pm.rate, 4) AS allocated_cost
 FROM daily d
 JOIN pm ON pm.qc_email = d.qc_email AND pm.month_key = d.month_key
@@ -920,6 +941,7 @@ async function runQuery(){
       bq(el("sql-c").value), bq(el("sql-d").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam);
     S.excluded = c.map(normExcl); S.products = d.map(normProd);
+    applyFx(CONFIG.arrToInr);   // keep ARR on whatever rate is currently set
     S.short = [["person-day",a],["team-month",b],["excluded",c],["product",d]]
       .filter(([,r]) => r.totalRows && r.length < r.totalRows)
       .map(([n,r]) => `${n}: ${int(r.length)} of ${int(r.totalRows)}`);
@@ -938,7 +960,9 @@ const normDaily = o => ({
   hours:num(o.hours)||0, images:num(o.images)||0,
   tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
   sum_target:num(o.sum_target)||0,
-  month_salary:num(o.month_salary), month_images:num(o.month_images)||0,
+  month_salary:num(o.month_salary),
+  pay_rows:num(o.pay_rows)||0, pay_inflation:num(o.pay_inflation)||0,
+  month_images:num(o.month_images)||0,
   month_target:num(o.month_target)||0,
   allocated_cost:num(o.allocated_cost)
 });
@@ -1139,6 +1163,7 @@ function byPersonMonth(rows){
     let p = m.get(k);
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
       match_type:r.match_type, salary:r.month_salary,
+      pay_rows:r.pay_rows, pay_inflation:r.pay_inflation,
       images:0, target:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
     p.images += r.images; p.target += r.sum_target; p.hours += r.hours; p.days += 1;
     if (r.allocated_cost != null) p.cost += r.allocated_cost;
@@ -1448,13 +1473,14 @@ function renderKpis(T, scoped, teams){
   const namedSum = P.Images + P["360"] + P.Video;
   const otherImgs = P.total - namedSum;
   const vol = [
-    ["Total images", int(T.images), "from vin_images", true],
-    ["Images", P.Images ? int(P.Images) : "—", `delivered · ${shareOf(P.Images)}`],
+    ["Images", P.Images ? int(P.Images) : "—", `delivered · ${shareOf(P.Images)}`, true],
     ["Spins / 360", P["360"] ? int(P["360"]) : "—", `delivered · ${shareOf(P["360"])}`],
     ["Video", P.Video ? int(P.Video) : "—", `delivered · ${shareOf(P.Video)}`],
     ["Total VINs", T.vins ? int(T.vins) : "—", "vehicles, from vin_images"],
+    // the divisor is spelled out, since the images total is no longer its own card
     ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
-      "vin_images images ÷ vehicles"],
+      T.images && T.vins ? `${int(T.images)} ÷ ${int(T.vins)}` : "vin_images"],
+    ["VIN coverage", dec(T.vinCoverage, 0) + "%", "team-months with a vin_images row"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
   ];
@@ -2095,6 +2121,56 @@ function coverage(){
       ).join("</li><li>")}${roofs.length>10?`</li><li>+${roofs.length-10} more`:""}</li></ul></div>`);
   }
 
+  /* The allocation guarantee, checked rather than assumed: for every matched
+     person-month, allocated cost must equal that month's salary. If a month
+     drifts, this names it instead of the number just looking wrong. */
+  const recon = new Map();
+  for (const p of byPersonMonth(S.daily)){
+    if (p.salary == null) continue;
+    const r = recon.get(p.month_key) || {salary:0, cost:0, people:0};
+    r.salary += p.salary; r.cost += p.cost; r.people++;
+    recon.set(p.month_key, r);
+  }
+  const drift = [...recon.entries()]
+    .map(([m,r]) => ({m, ...r, gap: r.cost - r.salary}))
+    .filter(x => Math.abs(x.gap) > Math.max(1, x.salary * 0.001));
+  if (drift.length){
+    chips.push(`allocation drift in ${drift.length} month${drift.length>1?"s":""}`);
+    items.push(`<div class="cov-item"><b>Allocated cost doesn't equal salary in
+      ${drift.length} month${drift.length>1?"s":""}.</b> Every rupee of salary should land on
+      exactly one month's work, so a gap means some work has no Sum_Target, or salary rows exist
+      for people with no delivery data.
+      <ul><li>${drift.sort((a,b)=>Math.abs(b.gap)-Math.abs(a.gap)).map(x =>
+        `${esc(x.m)} — salary ${money(x.salary)}, allocated ${money(x.cost)},
+         ${x.gap > 0 ? "over" : "under"} by ${money(Math.abs(x.gap))} across ${x.people} people`
+      ).join("</li><li>")}</li></ul></div>`);
+  }
+
+  /* Allocated cost always sums to salary, so if a month looks high the salary
+     side is high. Duplicate pay rows are the usual reason. */
+  const dupPay = byPersonMonth(S.daily).filter(p => p.pay_rows > 1);
+  if (dupPay.length){
+    const seen = new Map();
+    for (const p of dupPay) seen.set(p.email + "|" + p.month_key, p);
+    const rows = [...seen.values()];
+    const infl = rows.reduce((a,p) => a + p.pay_inflation, 0);
+    const byMonth = new Map();
+    for (const p of rows)
+      byMonth.set(p.month_key, (byMonth.get(p.month_key)||0) + p.pay_inflation);
+    chips.push(`${rows.length} duplicate salary row${rows.length>1?"s":""}`);
+    items.push(`<div class="cov-item"><b>${rows.length} person-months have more than one salary
+      row.</b> They are being ${CONFIG.duplicatePay === "max" ? "collapsed with MAX" : "summed"},
+      ${CONFIG.duplicatePay === "max"
+        ? "so the extra rows are ignored."
+        : `which adds ${money(infl)} to delivery cost. Set duplicatePay to "max" in CONFIG to keep
+           only the largest row instead.`}
+      <ul><li>${[...byMonth.entries()].sort().map(([m,v]) =>
+        `${esc(m)} — ${money(v)} from duplicates`).join("</li><li>")}</li></ul>
+      <ul><li>${rows.sort((a,b)=>b.pay_inflation-a.pay_inflation).slice(0,10).map(p =>
+        `${esc(p.email)} ${esc(p.month_key)} — ${p.pay_rows} rows, +${money(p.pay_inflation)}`
+      ).join("</li><li>")}</li></ul></div>`);
+  }
+
   const noTarget = byPersonMonth(S.daily).filter(p => p.images > 0 && !p.target);
   if (noTarget.length){
     const lost = noTarget.reduce((a,p) => a + p.images, 0);
@@ -2191,6 +2267,26 @@ function afterLoad(source){
 
 el("ver").textContent = VERSION;
 
+/* ARR is stored without a currency, so the rate that makes it comparable to INR
+   salary belongs in the UI — every margin figure moves with it. */
+function applyFx(rate){
+  CONFIG.arrToInr = rate;
+  for (const t of S.teams)
+    t.arr_month = t.contracted_arr ? t.contracted_arr * rate / 12 : null;
+  try { localStorage.setItem("qcFx", String(rate)); } catch(e){}
+}
+try {
+  const saved = Number(localStorage.getItem("qcFx"));
+  if (saved > 0) CONFIG.arrToInr = saved;
+} catch(e){}
+el("f-fx").value = CONFIG.arrToInr;
+el("f-fx").addEventListener("change", () => {
+  const v = Number(el("f-fx").value);
+  if (!(v > 0)){ el("f-fx").value = CONFIG.arrToInr; return; }
+  applyFx(v);
+  render();
+});
+
 if (LOGO_URL) el("mark").innerHTML =
   `<img src="${LOGO_URL}" alt="Spyne" onerror="this.remove()">`;
 
@@ -2199,6 +2295,7 @@ if (LOGO_URL) el("mark").innerHTML =
 const THEMES = { light:"Dark", dark:"Light" };
 function applyTheme(t){
   document.documentElement.setAttribute("data-theme", t);
+  document.documentElement.style.setProperty("--accent", BRAND[t]);
   el("btn-theme").textContent = THEMES[t];
   if (S.daily.length || S.teams.length) render();   // recolour the SVG charts
 }
