@@ -9,19 +9,24 @@
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans+Condensed:wght@600;700&family=IBM+Plex+Sans:wght@400;500&display=swap" rel="stylesheet">
 <style>
 :root{
-  --ink:#10151c; --steel:#5b6878; --steel-light:#8b97a5;
-  --paper:#eef1f5; --card:#fff; --rule:#dbe1e9; --rule-soft:#eaeef3;
-  --hover:#f6f9fb; --field:#fff; --tagbg:#eaeef3;
-  --cost-low:#0e7c66; --cost-mid:#5b6878; --cost-high:#9e1b32;
-  --shadow:0 12px 40px rgba(16,21,28,.16);
-  --pad:20px; --radius:3px;
+  /* Deep navy ink over a cool paper, with a single indigo accent for anything
+     interactive. The cost ramp runs emerald → amber → rose: the old ramp passed
+     through grey, so every mid-range value lost its colour entirely. */
+  --ink:#131b2b; --steel:#5a6880; --steel-light:#939fb3;
+  --paper:#eff2f7; --card:#fff; --rule:#dce1ea; --rule-soft:#ebeef4;
+  --hover:#f4f7fc; --field:#fff; --tagbg:#e9edf5;
+  --accent:#2f5fd8; --accent-soft:#eaf0ff;
+  --cost-low:#0f8f6a; --cost-mid:#c8951c; --cost-high:#cf3c53;
+  --shadow:0 16px 44px rgba(19,27,43,.18);
+  --pad:20px; --radius:4px;
 }
 [data-theme="dark"]{
-  --ink:#e8edf3; --steel:#94a3b5; --steel-light:#66788c;
-  --paper:#0b1017; --card:#131a23; --rule:#242f3c; --rule-soft:#1c2531;
-  --hover:#1a222d; --field:#0f161e; --tagbg:#1e2836;
-  --cost-low:#25a98c; --cost-mid:#94a3b5; --cost-high:#e05a70;
-  --shadow:0 12px 40px rgba(0,0,0,.5);
+  --ink:#e8ecf4; --steel:#94a2ba; --steel-light:#65728a;
+  --paper:#0c1017; --card:#151c27; --rule:#293344; --rule-soft:#1e2632;
+  --hover:#1c2531; --field:#101722; --tagbg:#1f2938;
+  --accent:#7d9bff; --accent-soft:#1a2440;
+  --cost-low:#23bd8c; --cost-mid:#e2ad3d; --cost-high:#f0687c;
+  --shadow:0 16px 44px rgba(0,0,0,.55);
 }
 html{color-scheme:light}
 html[data-theme="dark"]{color-scheme:dark}
@@ -42,8 +47,8 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .mark{width:34px;height:34px;border-radius:7px;background:var(--tagbg);flex:none;
   display:grid;grid-template-columns:1fr 1fr;gap:3px;padding:8px;margin-top:3px}
 .mark i{display:block;border-radius:1px;background:var(--steel-light)}
-.mark i:nth-child(1){background:var(--cost-low)}
-.mark i:nth-child(4){background:var(--cost-high)}
+.mark i:nth-child(1){background:var(--accent)}
+.mark i:nth-child(4){background:var(--cost-mid)}
 .mark img{width:100%;height:100%;object-fit:contain;grid-column:1/3;grid-row:1/3}
 .topbar .sub{color:var(--steel);font-size:13px;margin-top:2px}
 .ver{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light);
@@ -58,17 +63,21 @@ h1,h2{font-family:"IBM Plex Sans Condensed",sans-serif;margin:0;font-weight:700}
 .filterbar .div{width:1px;height:20px;background:var(--rule);margin:0 5px}
 select,input[type=text]{font:inherit;font-size:13px;color:var(--ink);background:var(--field);
   border:1px solid var(--rule);border-radius:var(--radius);padding:6px 8px;max-width:210px}
-select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--ink);outline-offset:1px}
-select.on,input.on{border-color:var(--ink);background:var(--hover)}
+select:focus,input:focus,button:focus,textarea:focus{outline:2px solid var(--accent);outline-offset:1px}
+select.on,input.on{border-color:var(--accent);background:var(--accent-soft);color:var(--ink)}
 button{font-family:"IBM Plex Sans Condensed",sans-serif;font-weight:700;font-size:12px;
-  letter-spacing:.06em;text-transform:uppercase;background:var(--ink);color:#fff;
-  border:1px solid var(--ink);border-radius:var(--radius);padding:8px 14px;cursor:pointer}
-button.ghost{background:transparent;color:var(--ink)}
+  letter-spacing:.06em;text-transform:uppercase;background:var(--accent);color:#fff;
+  border:1px solid var(--accent);border-radius:var(--radius);padding:8px 14px;cursor:pointer;
+  transition:filter .12s}
+button:hover{filter:brightness(1.08);opacity:1}
+button.ghost{background:transparent;color:var(--steel);border-color:var(--rule)}
+button.ghost:hover{color:var(--ink);border-color:var(--steel-light)}
 button.tiny{padding:6px 10px;font-size:11px}
 button:hover{opacity:.85}
 button[disabled]{opacity:.4;cursor:not-allowed}
 
-.panel{background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);margin-bottom:14px}
+.panel{background:var(--card);border:1px solid var(--rule);border-radius:var(--radius);
+  margin-bottom:14px;overflow:hidden}
 .panel-head{display:flex;align-items:center;justify-content:space-between;gap:12px;
   padding:11px var(--pad);border-bottom:1px solid var(--rule-soft)}
 .panel-head h2{font-size:13px;letter-spacing:.02em}
@@ -134,7 +143,7 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .seg button{background:var(--card);color:var(--steel);border:none;border-right:1px solid var(--rule);
   padding:6px 13px;font-size:11px}
 .seg button:last-child{border-right:none}
-.seg button.on{background:var(--ink);color:#fff}
+.seg button.on{background:var(--accent);color:#fff}
 
 .tablewrap{overflow-x:auto;max-height:580px}
 table{border-collapse:collapse;width:100%;font-size:13px}
@@ -451,7 +460,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v13 · 27 Aug 2026";
+const VERSION = "v14 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -704,9 +713,11 @@ const pct  = n => n == null ? "—" : dec(n,1) + "%";
 const esc  = s => String(s ?? "").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c]));
 const el   = id => document.getElementById(id);
 
+/* Emerald at well below average, amber at average, rose above. A grey midpoint
+   made every typical value colourless, which is most of the data. */
 const RAMP = {
-  light: [[.55,[14,124,102]],  [1,[91,104,120]],   [1.9,[158,27,50]]],
-  dark:  [[.55,[37,169,140]],  [1,[148,163,181]],  [1.9,[224,90,112]]]
+  light: [[.55,[15,143,106]],  [1,[200,149,28]],  [1.9,[207,60,83]]],
+  dark:  [[.55,[35,189,140]],  [1,[226,173,61]],  [1.9,[240,104,124]]]
 };
 function costColor(ratio){
   const stops = RAMP[document.documentElement.getAttribute("data-theme") === "dark"
@@ -1380,9 +1391,16 @@ function renderKpis(T, scoped, teams){
     ["ARR coverage", dec(T.arrCoverage,0) + "%", "rooftops with an ARR row"],
     ["True accuracy", pct(T.accuracy), `image-weighted · ${CONFIG.accuracyProduct} only`]
   ];
+  const P = productTotals();
+  const shareOf = n => P.total ? dec(n/P.total*100,1) + "% of images" : "";
   const vol = [
-    ["Total images", int(T.images), "delivered in view", true],
-    ["Total VINs", T.vins ? int(T.vins) : "—", "where accuracy is reported"],
+    ["Total images", int(T.images), "all products", true],
+    ["Images", P.Images ? int(P.Images) : "—", shareOf(P.Images) || "images product line"],
+    ["Spins / 360", P["360"] ? int(P["360"]) : "—", shareOf(P["360"]) || "360 product line"],
+    ["Video", P.Video ? int(P.Video) : "—", shareOf(P.Video) || "video product line"],
+    ["Total VINs", T.vins ? int(T.vins) : "—",
+      CONFIG.vinSource === "sku" ? "from SKU_Count" : "where accuracy is reported"],
+    ["SKUs", P.skus ? int(P.skus) : "—", "from delivery data"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
   ];
@@ -1508,6 +1526,18 @@ function prodPush(x, r){
 const prodDone = x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
   cpi: x.priced ? x.cost/x.priced : null,
   imagesPerSku: x.skus ? x.images/x.skus : null });
+
+/* Image counts per product line, for the Volume cards. Same scope as the
+   product table so the cards and the table can't disagree. */
+function productTotals(){
+  const out = { Images:0, "360":0, Video:0, skus:0, total:0 };
+  for (const r of productView()){
+    const k = prodLabel(r.product);
+    if (k in out) out[k] += r.images;
+    out.skus += r.sku_count; out.total += r.images;
+  }
+  return out;
+}
 
 function productTable(){
   const rows = productView();
