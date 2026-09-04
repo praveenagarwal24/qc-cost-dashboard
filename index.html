@@ -460,7 +460,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v20 · 27 Aug 2026";
+const VERSION = "v21 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -522,7 +522,8 @@ WITH work AS (
     IFNULL(Dealer_Type, 'UNKNOWN')                   AS dealer_type,
     IFNULL(Images, 0)                                AS images,
     IFNULL(Tool_Count, 0)                            AS tool_count,
-    IFNULL(SKU_Count, 0)                             AS sku_count   -- unused: per-row counter
+    IFNULL(SKU_Count, 0)                             AS sku_count,  -- unused: per-row counter
+    IFNULL(Sum_Target, 0)                            AS sum_target
   FROM \`${CONFIG.project}.${CONFIG.dataset}.delivery_working_data\`
   WHERE QC IS NOT NULL AND TRIM(QC) != ''
     AND (${INCLUDED})           -- delivery cost is @spyne.co.in work only
@@ -547,17 +548,21 @@ sal_email AS (
 pm_volume AS (
   SELECT qc_email, qc_local, month_key,
          SUM(images)                 AS month_images,
+         SUM(sum_target)             AS month_target,
          COUNT(DISTINCT Hourly_Date) AS month_hours
   FROM work GROUP BY qc_email, qc_local, month_key
 ),
 pm AS (
   SELECT
-    v.qc_email, v.month_key, v.month_images, v.month_hours,
+    v.qc_email, v.month_key, v.month_images, v.month_target, v.month_hours,
     s.salary                                                  AS month_salary,
     COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
     s.emp_no                                                  AS emp_no,
     IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
-    SAFE_DIVIDE(s.salary, NULLIF(v.month_images, 0))          AS rate
+    -- A month's salary spread over that month's Sum_Target, so the rate is
+    -- cost per unit of target rather than cost per image. Work with a higher
+    -- target per image — a 360 spin against a still — now costs more.
+    SAFE_DIVIDE(s.salary, NULLIF(v.month_target, 0))          AS rate
   FROM pm_volume v
   LEFT JOIN sal_email s
     ON  s.month_key = v.month_key
@@ -568,15 +573,16 @@ const SQL_A = SHARED + `,
 daily AS (
   SELECT qc_email, month_key, work_date,
          COUNT(DISTINCT Hourly_Date) AS hours,
-         SUM(images) AS images, SUM(tool_count) AS tool_count, SUM(sku_count) AS sku_count
+         SUM(images) AS images, SUM(sum_target) AS sum_target,
+         SUM(tool_count) AS tool_count, SUM(sku_count) AS sku_count
   FROM work GROUP BY qc_email, month_key, work_date
 )
 SELECT
   d.month_key, d.qc_email AS email, pm.name, pm.emp_no, pm.match_type,
   CAST(d.work_date AS STRING) AS work_date,
-  d.hours, d.images, d.tool_count, d.sku_count,
-  pm.month_salary, pm.month_images, pm.month_hours,
-  ROUND(d.images * pm.rate, 4) AS allocated_cost
+  d.hours, d.images, d.sum_target, d.tool_count, d.sku_count,
+  pm.month_salary, pm.month_images, pm.month_target, pm.month_hours,
+  ROUND(d.sum_target * pm.rate, 4) AS allocated_cost
 FROM daily d
 JOIN pm ON pm.qc_email = d.qc_email AND pm.month_key = d.month_key
 ORDER BY d.work_date DESC, d.images DESC`;
@@ -644,9 +650,10 @@ team AS (
     SUM(IF(LOWER(TRIM(w.Product)) = LOWER('${CONFIG.accuracyProduct}'), w.images, 0))
                                                   AS images_acc,
     ROUND(SUM(IF(LOWER(TRIM(w.Product)) = LOWER('${CONFIG.accuracyProduct}'),
-      w.images * IFNULL(pm.rate, 0), 0)), 2)      AS cost_acc,
+      w.sum_target * IFNULL(pm.rate, 0), 0)), 2) AS cost_acc,
     SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
-    ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost,
+    SUM(w.sum_target)                             AS sum_target,
+    ROUND(SUM(w.sum_target * IFNULL(pm.rate, 0)), 2) AS allocated_cost,
     -- hours attributed the same way cost is: share of the person's monthly output
     ROUND(SUM(w.images * SAFE_DIVIDE(pm.month_hours, pm.month_images)), 2) AS hours_attributed
   FROM work w
@@ -656,7 +663,7 @@ team AS (
 SELECT
   t.month_key, t.team_id, t.team_name, t.enterprise, t.enterprise_id, t.dealer_type,
   t.people, t.reviewers,
-  t.images, t.unpriced_images,
+  t.images, t.unpriced_images, t.sum_target,
   t.images_acc, t.cost_acc,
   t.allocated_cost, t.hours_attributed,
   a.segment, a.poc, a.acc_rows, a.acc_images,
@@ -684,7 +691,8 @@ SELECT
   ANY_VALUE(w.Enterprise)     AS enterprise,
   SUM(w.images)               AS images,
   SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
-  ROUND(SUM(w.images * IFNULL(pm.rate, 0)), 2)  AS allocated_cost
+  SUM(w.sum_target)                             AS sum_target,
+  ROUND(SUM(w.sum_target * IFNULL(pm.rate, 0)), 2) AS allocated_cost
 FROM work w
 JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
 GROUP BY w.month_key, product, w.team_id`;
@@ -925,7 +933,9 @@ const normDaily = o => ({
   match_type:o.match_type||"none", work_date:String(o.work_date||"").slice(0,10),
   hours:num(o.hours)||0, images:num(o.images)||0,
   tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
+  sum_target:num(o.sum_target)||0,
   month_salary:num(o.month_salary), month_images:num(o.month_images)||0,
+  month_target:num(o.month_target)||0,
   allocated_cost:num(o.allocated_cost)
 });
 const normTeam = o => ({
@@ -954,6 +964,7 @@ const normProd = o => ({
   team_name:o.team_name||"—", enterprise:o.enterprise||"—",
   images:num(o.images)||0,
   unpriced_images:num(o.unpriced_images)||0,
+  sum_target:num(o.sum_target)||0,
   allocated_cost:num(o.allocated_cost)||0
 });
 const normExcl = o => ({
@@ -1123,8 +1134,8 @@ function byPersonMonth(rows){
     let p = m.get(k);
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
       match_type:r.match_type, salary:r.month_salary,
-      images:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
-    p.images += r.images; p.hours += r.hours; p.days += 1;
+      images:0, target:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
+    p.images += r.images; p.target += r.sum_target; p.hours += r.hours; p.days += 1;
     if (r.allocated_cost != null) p.cost += r.allocated_cost;
   }
   return [...m.values()].map(p => ({...p,
@@ -1411,8 +1422,9 @@ function renderKpis(T, scoped, teams){
   // three groups of exactly four, so no row is left half-empty
   const cost = [
     ["Delivery cost", money(T.cost),
-      `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, allocated`, true],
+      `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, split by Sum_Target`, true],
     ["Cost per image", T.blended ? money(T.blended) : "—", "cost ÷ vin_images images"],
+
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
     ["Churned cost", money(T.churnedCost),
@@ -2060,6 +2072,17 @@ function coverage(){
       <ul><li>${roofs.slice(0,10).map(x =>
         `${esc(x.ent)} · ${esc(x.name)} — ${int(x.acc)} in vin_images vs ${int(x.del)} delivered`
       ).join("</li><li>")}${roofs.length>10?`</li><li>+${roofs.length-10} more`:""}</li></ul></div>`);
+  }
+
+  const noTarget = byPersonMonth(S.daily).filter(p => p.images > 0 && !p.target);
+  if (noTarget.length){
+    const lost = noTarget.reduce((a,p) => a + p.images, 0);
+    const who = [...new Set(noTarget.map(p => p.email))];
+    chips.push(`${who.length} people with no Sum_Target`);
+    items.push(`<div class="cov-item"><b>${who.length} people delivered images but have no
+      Sum_Target for that month.</b> Cost is allocated on Sum_Target, so their ${int(lost)} images
+      carry zero cost and the blended rate is understated.
+      <ul><li>${who.slice(0,12).map(esc).join("</li><li>")}${who.length>12?`</li><li>+${who.length-12} more`:""}</li></ul></div>`);
   }
 
   const vTot = S.teams.reduce((a,t) => a + (t.vin_images||0), 0);
