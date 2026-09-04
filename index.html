@@ -473,7 +473,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v26 · 27 Aug 2026";
+const VERSION = "v27 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1225,10 +1225,11 @@ function rollTeams(rows, keyFn, labelFn){
    an unfiltered one are computed the same way. The person rows are only used
    for hours and headcount, which have no team-level equivalent. */
 function totals(pms, teams, scoped){
-  let vins = 0, images = 0, vinImages = 0, cost = 0, costWithVins = 0;
+  let vins = 0, images = 0, imagesAcc = 0, vinImages = 0, cost = 0, costWithVins = 0;
   let arrMonth = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
     images += t.images;
+    imagesAcc += t.images_acc;
     cost += t.allocated_cost;
     if (t.vin_images || t.vins){
       vins += t.vins; vinImages += t.vin_images; costWithVins += t.allocated_cost;
@@ -1238,9 +1239,10 @@ function totals(pms, teams, scoped){
   }
 
   const base = {
-    vins, images, vinImages, cost, costWithVins, churnedCost, arrMonth, costWithArr,
+    vins, images, imagesAcc, vinImages, cost, costWithVins, churnedCost,
+    arrMonth, costWithArr,
     blended:      images ? cost/images : 0,
-    imagesPerVin: vins ? images/vins : null,
+    imagesPerVin: vins ? imagesAcc/vins : null,
     costPerVin:   vins ? costWithVins/vins : null,
     costRatio:    arrMonth ? costWithArr/arrMonth*100 : null,
     arrCoverage:  teams.length
@@ -1488,7 +1490,8 @@ function renderKpis(T, scoped, teams){
     ["Total VINs", T.vins ? int(T.vins) : "—", "vehicles, from vin_images"],
     // the divisor is spelled out, since the images total is no longer its own card
     ["Images per VIN", T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
-      T.images && T.vins ? `${int(T.images)} ÷ ${int(T.vins)}` : "images ÷ vehicles"],
+      T.imagesAcc && T.vins
+        ? `${int(T.imagesAcc)} ÷ ${int(T.vins)}` : `${CONFIG.accuracyProduct} ÷ vehicles`],
     ["VIN coverage", dec(T.vinCoverage, 0) + "%", "team-months with a vin_images row"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
@@ -1548,12 +1551,13 @@ const vinsOf = t => t.vins || 0;
    costWithVins — cost of team-months that have a vin_images row, so cost per VIN
               never divides full cost by a partial vehicle count */
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(),
-  images:0, vinImages:0, cost:0, vins:0, costWithVins:0,
+  images:0, imagesAcc:0, vinImages:0, cost:0, vins:0, costWithVins:0,
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
 function addAgg(x, t){
   x.ents.add(t.enterprise); x.roofs.add(t.team_id);
   x.images += t.images;
+  x.imagesAcc += t.images_acc;      // the Images product line on its own
   x.cost += t.allocated_cost;
   if (t.vin_images || t.vins){
     x.vinImages += t.vin_images;
@@ -1571,7 +1575,10 @@ function addAgg(x, t){
 const deriveAgg = x => ({...x,
   ents: x.ents.size, roofs: x.roofs.size,
   cpi: x.images ? x.cost/x.images : null,
-  imagesPerVin: x.vins ? x.images/x.vins : null,   // delivered images / vehicles
+  /* Vehicles are photographed for the Images line; Video and 360 are separate
+     deliverables against the same cars. Dividing all three by the vehicle count
+     would overstate how many stills each car actually gets. */
+  imagesPerVin: x.vins ? x.imagesAcc/x.vins : null,
   costPerVin: x.vins ? x.costWithVins/x.vins : null,
   costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
   // what's left of ARR after the cost of serving it
@@ -1646,14 +1653,13 @@ function productTable(){
       <td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
       <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
       <td>${int(r.images)}</td>
-      <td>${dec(r.target,0)}</td>
       <td>${money(r.cost)}</td>
       <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
       <td>${allR.images ? dec(r.images/allR.images*100,1) + "%" : DASH}</td></tr>`;
 
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Product</th><th>Enterprises</th><th>Rooftops</th>
-      <th>Images</th><th>Sum target</th><th>Delivery cost</th><th>Cost / image</th>
+      <th>Images</th><th>Delivery cost</th><th>Cost / image</th>
       <th>Share of images</th></tr></thead>
     <tbody>${out.map(r => line(r, false)).join("")}
       ${line(allR, true)}</tbody>
@@ -1698,6 +1704,8 @@ function segmentTable(teams, T){
       ${line(deriveAgg(all), true)}</tbody>
   </table>
   <div class="seghint">Images and cost come from delivery_working_data, vehicles from vin_images ·
+    images per VIN counts the ${esc(CONFIG.accuracyProduct)} line only, since Video and 360 are
+    separate deliverables against the same cars ·
     accuracy comes from
     ai_accuracy, which covers ${esc(CONFIG.accuracyProduct)} only · the product split below is
     from delivery_working_data · click a segment to see its rooftops</div></div>`;
@@ -1737,7 +1745,6 @@ const DRILL = {
       ["rooftop",       "Rooftop",       "text"],
       ["team_id",       "Team ID",       "id"],
       ["images",        "Images",        "int"],
-      ["target",        "Sum target",    "dec"],
       ["cost",          "Delivery cost", "money"],
       ["cpi",           "Cost / image",  "money"]
     ],
