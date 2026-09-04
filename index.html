@@ -97,6 +97,18 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 .hero-trend{flex:1 1 340px;min-width:300px;max-width:620px}
 #chart-months{width:100%;display:block;overflow:visible;margin-top:4px}
 .trend-head{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.trend-head-row{flex-wrap:wrap;row-gap:10px}
+.trend-left{display:flex;align-items:center;gap:14px;flex-wrap:wrap}
+.trend-right{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.chips{display:flex;gap:6px;flex-wrap:wrap}
+.chip-btn{display:inline-flex;align-items:center;gap:6px;cursor:pointer;
+  border:1px solid var(--rule);border-radius:999px;padding:3px 11px 3px 8px;
+  font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light);
+  background:var(--card);text-transform:none;letter-spacing:0;font-weight:400}
+.chip-btn .dot{width:9px;height:9px;border-radius:50%;flex:none;opacity:.3}
+.chip-btn.on{color:var(--ink);border-color:var(--steel-light)}
+.chip-btn.on .dot{opacity:1}
+.chip-btn:hover{border-color:var(--steel-light)}
 .seg.mini button{padding:3px 10px;font-size:10px}
 @media(max-width:760px){.hero{gap:22px}.hero-stats{gap:28px}}
 
@@ -424,6 +436,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <textarea id="sql-c" spellcheck="false" style="min-height:140px"></textarea>
       <div class="eyebrow">D · product × team × month — what was delivered</div>
       <textarea id="sql-d" spellcheck="false"></textarea>
+      <div class="eyebrow">E · product × day — drives the trend chart</div>
+      <textarea id="sql-e" spellcheck="false" style="min-height:150px"></textarea>
     </div>
   </details>
 
@@ -457,9 +471,19 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   </div>
 
   <div class="panel">
-    <div class="panel-head">
-      <h2 id="trend-title">Daily output and rate</h2>
-      <span class="status" id="trend-n"></span>
+    <div class="panel-head trend-head-row">
+      <div class="trend-left">
+        <h2 id="trend-title">Output and rate</h2>
+        <div class="chips" id="trend-products"></div>
+      </div>
+      <div class="trend-right">
+        <span class="status" id="trend-n"></span>
+        <div class="seg mini" id="trend-grain">
+          <button data-g="day" class="on">Day</button>
+          <button data-g="week">Week</button>
+          <button data-g="month">Month</button>
+        </div>
+      </div>
     </div>
     <div class="panel-body"><svg class="chart" id="chart-trend"></svg></div>
   </div>
@@ -473,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v27 · 27 Aug 2026";
+const VERSION = "v28 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -732,6 +756,19 @@ FROM work w
 JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
 GROUP BY w.month_key, product, w.team_id`;
 
+/* Day x product, with no team dimension so the result stays small. This is what
+   the trend chart reads: product tags and the day/week/month grouping both work
+   off it without a per-rooftop explosion of rows. */
+const SQL_E = SHARED + `
+SELECT
+  CAST(w.work_date AS STRING)  AS work_date,
+  IFNULL(NULLIF(TRIM(w.Product), ''), 'Unspecified') AS product,
+  SUM(w.images)                AS images,
+  ROUND(SUM(w.sum_target * IFNULL(pm.rate, 0)), 2) AS allocated_cost
+FROM work w
+JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
+GROUP BY work_date, product`;
+
 const SQL_C = `
 SELECT
   FORMAT_DATE('%Y-%m', DATE(Hourly_Date))     AS month_key,
@@ -747,8 +784,11 @@ ORDER BY images DESC`;
 /* ==========================================================================
    3. STATE + FORMAT
    ========================================================================== */
-const S = { daily:[], teams:[], excluded:[], view:"accounts",
-            sortKey:"cpi", sortDir:-1, token:null };
+const S = {
+  daily:[], teams:[], products:[], trend:[], excluded:[], short:[],
+  view:"accounts", sortKey:"cpi", sortDir:-1, drill:null,
+  monthChart:"bar", trendGrain:"day", trendProducts:null
+};
 
 /* Rates always show one decimal so a column reads evenly — Intl drops trailing
    zeros otherwise and you get 0.4 next to 0.39 in the same column. */
@@ -946,11 +986,14 @@ async function runQuery(){
   const btn = el("btn-run");
   btn.disabled = true; btn.textContent = "Loading…"; clearAlerts(); startLoader();
   try{
-    const [a,b,c,d] = await Promise.all([
+    const [a,b,c,d,e] = await Promise.all([
       bq(el("sql-a").value), bq(el("sql-b").value),
-      bq(el("sql-c").value), bq(el("sql-d").value)]);
+      bq(el("sql-c").value), bq(el("sql-d").value), bq(el("sql-e").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam);
     S.excluded = c.map(normExcl); S.products = d.map(normProd);
+    S.trend = e.map(o => ({ work_date:String(o.work_date||"").slice(0,10),
+      product:o.product||"Unspecified",
+      images:num(o.images)||0, allocated_cost:num(o.allocated_cost)||0 }));
     applyFx(CONFIG.arrToInr);   // keep ARR on whatever rate is currently set
     S.short = [["person-day",a],["team-month",b],["excluded",c],["product",d]]
       .filter(([,r]) => r.totalRows && r.length < r.totalRows)
@@ -1021,6 +1064,7 @@ async function loadJson(){
     S.teams = (j.teams||[]).map(normTeam);
     S.excluded = (j.excluded||[]).map(normExcl);
     S.products = (j.products||[]).map(normProd);
+    S.trend = j.trend || [];
     afterLoad(CONFIG.jsonFallback);
     return true;
   }catch(e){ return false; }
@@ -1123,10 +1167,21 @@ function sample(){
       allocated_cost: +(t.allocated_cost*share).toFixed(2)});
   }));
 
+  const trend = [];
+  const allDates = [...new Set(daily.map(d => d.work_date))].sort();
+  allDates.forEach((dt,i) => {
+    const base = 900 + ((i*37)%11)*180;
+    [["Images",.86],["Video",.05],["360",.09]].forEach(([p,share]) => {
+      trend.push({work_date:dt, product:p,
+        images: Math.round(base*share),
+        allocated_cost: +(base*share*(p==="Video"?7.5:p==="360"?3.9:0.42)).toFixed(2)});
+    });
+  });
+
   const excluded = [];
   ["raj.tripathi@spyne.ai","kishor@spyne.ai","bestakkikumar@gmail.com"].forEach((e,i) =>
     months.forEach(mk => excluded.push({month_key:mk, email:e, images:4200+i*1900, hours:120+i*22})));
-  return {daily, teams, excluded, products};
+  return {daily, teams, excluded, products, trend};
 }
 
 /* ==========================================================================
@@ -1921,118 +1976,184 @@ function renderDrill(){
   }));
 }
 
-/* Daily when unscoped; monthly from team rows when an account filter is on, so
-   the chart respects the filter instead of quietly showing everything. Bars are
-   coloured on the same cost ramp as the rest of the page — colour means rate,
-   height means volume, so an expensive quiet day is visible at a glance. */
+/* Product colours come from the Spyne palette. Colour here means product, not
+   cost — the previous version tinted every bar on the cost ramp, which turned
+   the whole chart olive because almost every day sits near the average. The
+   cost ramp now belongs to the line alone, where variation is actually legible. */
+const PRODUCT_COLOR = {
+  "Images":      "var(--accent)",
+  "360":         "var(--accent-2)",
+  "Video":       "var(--coral)",
+  "Unspecified": "var(--steel-light)"
+};
+const productColor = p => PRODUCT_COLOR[p] || "var(--steel)";
+
+const weekStart = iso => {
+  const d = new Date(iso + "T00:00:00Z");
+  d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7));   // Monday
+  return d.toISOString().slice(0,10);
+};
+const bucketOf = (iso, grain) =>
+  grain === "month" ? iso.slice(0,7) : grain === "week" ? weekStart(iso) : iso;
+
+function trendProductList(){
+  return [...new Set(S.trend.map(r => prodLabel(r.product)))]
+    .sort((a,b) => prodRank(a) - prodRank(b));
+}
+function activeProducts(){
+  const all = trendProductList();
+  if (!S.trendProducts) return new Set(all);
+  const on = new Set([...S.trendProducts].filter(p => all.includes(p)));
+  return on.size ? on : new Set(all);
+}
+
+function renderChips(){
+  const all = trendProductList(), on = activeProducts();
+  el("trend-products").innerHTML = all.map(p =>
+    `<button class="chip-btn${on.has(p) ? " on" : ""}" data-p="${esc(p)}">`
+    + `<span class="dot" style="background:${productColor(p)}"></span>${esc(p)}</button>`).join("");
+  el("trend-products").querySelectorAll(".chip-btn").forEach(b =>
+    b.addEventListener("click", () => {
+      const cur = new Set(activeProducts()), p = b.dataset.p;
+      cur.has(p) ? cur.delete(p) : cur.add(p);
+      S.trendProducts = cur.size ? cur : null;   // never leave the chart empty
+      render();
+    }));
+}
+
 function renderTrend(rows, teams, T, scoped){
   const svg = el("chart-trend");
-  let pts, grain;
+  renderChips();
+  const grain = S.trendGrain || "day";
+  const on = activeProducts();
+  const f = F();
+
+  /* S.trend has no team dimension, so an account filter can't scope it. The
+     monthly team rows can, so the chart switches to those and the product tags
+     drop out rather than showing a figure the filter didn't touch. */
+  let pts, prods, stacked;
   if (scoped){
-    grain = "month";
     const m = new Map();
     for (const t of teams){
-      const d = m.get(t.month_key) || {date:t.month_key, images:0, cost:0, priced:0};
+      const d = m.get(t.month_key) || {key:t.month_key, images:0, cost:0};
       d.images += t.images; d.cost += t.allocated_cost;
-      d.priced += t.images - t.unpriced_images;
       m.set(t.month_key, d);
     }
-    pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
+    pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key));
+    prods = []; stacked = false;
+    el("trend-products").innerHTML =
+      `<span class="status">product split unavailable under an account filter</span>`;
   }else{
-    grain = "day";
     const m = new Map();
-    for (const r of rows){
-      const d = m.get(r.work_date) || {date:r.work_date, images:0, cost:0, priced:0};
-      d.images += r.images;
-      if (r.allocated_cost != null){ d.cost += r.allocated_cost; d.priced += r.images; }
-      m.set(r.work_date, d);
+    for (const r of S.trend){
+      if (f.month && !r.work_date.startsWith(f.month)) continue;
+      const p = prodLabel(r.product);
+      if (!on.has(p)) continue;
+      const k = bucketOf(r.work_date, grain);
+      let d = m.get(k);
+      if (!d) m.set(k, d = {key:k, images:0, cost:0, by:{}});
+      d.images += r.images; d.cost += r.allocated_cost;
+      d.by[p] = (d.by[p] || 0) + r.images;
     }
-    pts = [...m.values()].sort((a,b) => a.date.localeCompare(b.date));
+    pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key));
+    prods = trendProductList().filter(p => on.has(p));
+    stacked = true;
   }
-  pts = pts.map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+  pts = pts.map(d => ({...d, cpi: d.images ? d.cost/d.images : 0}));
 
-  el("trend-title").textContent = scoped ? "Monthly output and rate" : "Daily output and rate";
+  el("trend-title").textContent =
+    grain === "day" ? "Daily output and rate"
+    : grain === "week" ? "Weekly output and rate" : "Monthly output and rate";
   el("trend-n").textContent = pts.length
-    ? `${pts.length} ${grain}s · bar height = images, colour = cost per image`
-      + (grain === "day" ? " · click a bar for that day" : "")
+    ? `${pts.length} ${grain}s · ${int(pts.reduce((a,d)=>a+d.images,0))} images`
     : "";
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
-  const W = svg.clientWidth || 1160, H = 350;
-  const padL = 54, padR = 52, padT = 26, padB = 34;
+  const W = svg.clientWidth || 1160, H = 340;
+  const padL = 60, padR = 58, padT = 30, padB = 46;
   const pw = W-padL-padR, plotH = H-padT-padB;
   const maxImg = Math.max(...pts.map(d => d.images)) || 1;
-  const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.2) || 1;
-  const step = pw/pts.length, bw = Math.max(1.5, Math.min(52, step-3));
+  const maxCpi = (Math.max(...pts.map(d => d.cpi))*1.25) || 1;
+  const step = pw/pts.length, bw = Math.max(2, Math.min(56, step-3));
   const cx = i => padL + i*step + step/2;
   const cy = v => padT + plotH - v/maxCpi*plotH;
+  const yImg = v => padT + plotH - v/maxImg*plotH;
 
-  const lo = Math.min(...pts.map(d => d.cpi)), hi = Math.max(...pts.map(d => d.cpi));
-  const loI = pts.findIndex(d => d.cpi === lo), hiI = pts.findIndex(d => d.cpi === hi);
-
-  let s = `<defs>
-    <linearGradient id="areaGrad" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0%" stop-color="${costColor(hi/(T.blended||1))}" stop-opacity=".26"/>
-      <stop offset="100%" stop-color="${costColor(lo/(T.blended||1))}" stop-opacity=".02"/>
-    </linearGradient>
-  </defs>`;
+  let s = `<defs><linearGradient id="lineGrad" x1="0" y1="0" x2="0" y2="1">
+    <stop offset="0%" stop-color="${costColor(1.9)}" stop-opacity=".22"/>
+    <stop offset="100%" stop-color="${costColor(.55)}" stop-opacity="0"/></linearGradient></defs>`;
 
   for (let i=0; i<=4; i++){
     const y = padT + plotH*i/4;
     s += `<line x1="${padL}" y1="${y}" x2="${W-padR}" y2="${y}" stroke="var(--rule-soft)"/>`
-       + `<text x="${padL-8}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(maxImg*(1-i/4))}</text>`
-       + `<text x="${W-padR+8}" y="${y+3}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi*(1-i/4))}</text>`;
+       + `<text x="${padL-10}" y="${y+3}" text-anchor="end" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${int(maxImg*(1-i/4))}</text>`
+       + `<text x="${W-padR+10}" y="${y+3}" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">${money(maxCpi*(1-i/4))}</text>`;
   }
 
+  // stacked by product, so height is volume and colour says which line of business
   s += pts.map((d,i) => {
-    const hgt = d.images/maxImg*plotH;
-    return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="1.5" `
-      + `fill="${costColor(d.cpi/(T.blended||1))}" opacity=".55"/>`;
+    if (!stacked){
+      const hgt = d.images/maxImg*plotH;
+      return `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" `
+        + `rx="2" fill="var(--accent)" opacity=".55"/>`;
+    }
+    let acc = 0, out = "";
+    for (const p of prods){
+      const v = d.by[p] || 0;
+      if (!v) continue;
+      const hgt = v/maxImg*plotH;
+      const yTop = padT + plotH - (acc + v)/maxImg*plotH;
+      out += `<rect x="${cx(i)-bw/2}" y="${yTop}" width="${bw}" height="${hgt}" `
+        + `fill="${productColor(p)}" opacity=".82"/>`;
+      acc += v;
+    }
+    return out;
   }).join("");
 
-  // filled area under the rate line, tinted by where the rate sits on the ramp
   s += `<path d="M${cx(0)},${padT+plotH} `
      + pts.map((d,i) => `L${cx(i)},${cy(d.cpi)}`).join(" ")
-     + ` L${cx(pts.length-1)},${padT+plotH} Z" fill="url(#areaGrad)"/>`;
-
+     + ` L${cx(pts.length-1)},${padT+plotH} Z" fill="url(#lineGrad)"/>`;
   s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" `
-     + `stroke="var(--ink)" stroke-width="1.8" stroke-linejoin="round" stroke-linecap="round"/>`;
-  s += pts.map((d,i) =>
-    `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="${i===loI||i===hiI ? 4 : 2.6}" `
-    + `fill="${i===loI||i===hiI ? costColor(d.cpi/(T.blended||1)) : "var(--card)"}" `
-    + `stroke="var(--ink)" stroke-width="1.4"/>`).join("");
+     + `stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
 
-  /* Label every point when there is room, otherwise thin them out and always
-     keep the highest and lowest, since those are the days worth asking about. */
-  const gap = Math.max(1, Math.ceil(pts.length / Math.max(4, Math.floor(pw/62))));
+  const lo = Math.min(...pts.map(d=>d.cpi)), hi = Math.max(...pts.map(d=>d.cpi));
+  const loI = pts.findIndex(d=>d.cpi===lo), hiI = pts.findIndex(d=>d.cpi===hi);
+  s += pts.map((d,i) =>
+    `<circle cx="${cx(i)}" cy="${cy(d.cpi)}" r="${i===loI||i===hiI?4:2.6}" `
+    + `fill="${i===loI||i===hiI ? costColor(d.cpi/(T.blended||1)) : "var(--card)"}" `
+    + `stroke="var(--ink)" stroke-width="1.5"/>`).join("");
+
+  const gap = Math.max(1, Math.ceil(pts.length / Math.max(4, Math.floor(pw/64))));
   s += pts.map((d,i) => {
-    const keep = i === loI || i === hiI || i % gap === 0 || i === pts.length-1;
-    if (!keep) return "";
-    const strong = i === loI || i === hiI;
-    return `<text x="${cx(i)}" y="${cy(d.cpi) - (strong ? 11 : 9)}" text-anchor="middle" `
-      + `font-family="IBM Plex Mono" font-size="${strong ? 11 : 10}" `
-      + `font-weight="${strong ? 600 : 400}" `
+    if (!(i===loI || i===hiI || i%gap===0 || i===pts.length-1)) return "";
+    const strong = i===loI || i===hiI;
+    return `<text x="${cx(i)}" y="${cy(d.cpi)-10}" text-anchor="middle" `
+      + `font-family="IBM Plex Mono" font-size="${strong?11:10}" font-weight="${strong?600:400}" `
       + `fill="${strong ? costColor(d.cpi/(T.blended||1)) : "var(--steel)"}">${money(d.cpi)}</text>`;
   }).join("");
 
-  s += pts.map((d,i) =>
-    `<g class="${grain === "day" ? "trendhit" : "trendhit nolink"}" data-date="${d.date}">`
-    + `<title>${d.date}\n${int(d.images)} images · ${money(d.cpi)} per image`
-    + `\n${money(d.cost)} delivery cost${grain === "day" ? "\nClick for the people behind it" : ""}</title>`
-    + `<rect x="${cx(i)-step/2}" y="${padT}" width="${step}" height="${plotH}" fill="transparent"/></g>`
-  ).join("");
+  s += pts.map((d,i) => {
+    const detail = prods.map(p => d.by && d.by[p]
+      ? `\n  ${p}: ${int(d.by[p])}` : "").join("");
+    return `<g class="${grain === "day" && !scoped ? "trendhit" : "trendhit nolink"}" data-date="${d.key}">`
+      + `<title>${d.key}\n${int(d.images)} images${detail}\n${money(d.cpi)} per image`
+      + `\n${money(d.cost)} delivery cost`
+      + `${grain === "day" && !scoped ? "\nClick for the people behind it" : ""}</title>`
+      + `<rect x="${cx(i)-step/2}" y="${padT}" width="${step}" height="${plotH}" fill="transparent"/></g>`;
+  }).join("");
 
   const every = Math.ceil(pts.length/12);
   s += pts.map((d,i) => i % every ? "" :
-    `<text x="${cx(i)}" y="${H-12}" text-anchor="middle" font-family="IBM Plex Mono" `
-    + `font-size="10" fill="var(--steel-light)">${grain === "day" ? d.date.slice(5) : d.date}</text>`).join("");
-  s += `<text x="${padL}" y="${H-12}" font-family="Inter" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">IMAGES</text>`
-     + `<text x="${W-padR}" y="${H-12}" text-anchor="end" font-family="Inter" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">COST / IMAGE</text>`;
+    `<text x="${cx(i)}" y="${H-20}" text-anchor="middle" font-family="IBM Plex Mono" `
+    + `font-size="10" fill="var(--steel-light)">${
+      grain === "month" ? d.key : d.key.slice(5)}</text>`).join("");
+  s += `<text x="${padL-10}" y="${H-6}" text-anchor="end" font-family="Inter" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">IMAGES</text>`
+     + `<text x="${W-padR+10}" y="${H-6}" font-family="Inter" font-weight="700" font-size="9" letter-spacing=".1em" fill="var(--steel-light)">COST / IMAGE</text>`;
 
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`); svg.setAttribute("height", H);
   svg.innerHTML = s;
 
-  if (grain === "day")
+  if (grain === "day" && !scoped)
     svg.querySelectorAll(".trendhit").forEach(g =>
       g.addEventListener("click", () => openDrill("day", g.dataset.date)));
 }
@@ -2339,6 +2460,7 @@ el("btn-theme").addEventListener("click", () => {
 });
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
 el("sql-d").value = SQL_D;
+el("sql-e").value = SQL_E;
 el("btn-run").addEventListener("click", runQuery);
 ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
   .forEach(id => el(id).addEventListener("change", render));
@@ -2355,6 +2477,14 @@ document.querySelectorAll("#month-mode button").forEach(b =>
     document.querySelectorAll("#month-mode button").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
     S.monthChart = b.dataset.m;
+    render();
+  }));
+
+document.querySelectorAll("#trend-grain button").forEach(b =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#trend-grain button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    S.trendGrain = b.dataset.g;
     render();
   }));
 
