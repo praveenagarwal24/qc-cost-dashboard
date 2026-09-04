@@ -497,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v31 · 27 Aug 2026";
+const VERSION = "v32 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1214,6 +1214,10 @@ const F = () => ({
 });
 const accActive = () => { const f = F();
   return !!(f.seg || f.dt || f.poc || f.stage || f.prod || f.ver || f.ent || f.roof); };
+/* The trend series carries product but not rooftop, so a product filter can be
+   applied to it directly — only the account-shaped filters force the fallback. */
+const accActiveNonProduct = () => { const f = F();
+  return !!(f.seg || f.dt || f.poc || f.stage || f.ver || f.ent || f.roof); };
 
 function dailyView(){
   const f = F();
@@ -1382,7 +1386,7 @@ function render(){
   markActive(); renderScope(teams, scoped);
   renderHero(pms, T, scoped);
   renderKpis(T, scoped, teams);
-  renderTrend(rows, teams, T, scoped);
+  renderTrend(rows, teams, T, accActiveNonProduct());
   document.querySelectorAll(".segrow").forEach(tr =>
     tr.addEventListener("click", () => openDrill("segment", tr.dataset.seg)));
   document.querySelectorAll(".prodrow").forEach(tr =>
@@ -1669,6 +1673,24 @@ const vinsOf = t => t.vins || 0;
    other lines of business, so they're excluded rather than diluting the split.
    ARR is then divided evenly across whichever of the three an account holds. */
 const ARR_PRODUCTS = ["Images", "Video", "360"];
+
+/* delivery_working_data split by product, keyed by team-month. Segment rows need
+   a cost per spin and per video, and those only exist at product grain. */
+let _piCache = null, _piSrc = null;
+function productIndex(){
+  if (_piSrc === S.products && _piCache) return _piCache;   // unfiltered on purpose
+  const m = new Map();
+  for (const r of S.products){
+    const k = r.team_id + "|" + r.month_key;
+    let e = m.get(k);
+    if (!e) m.set(k, e = {});
+    const p = prodLabel(r.product);
+    if (!e[p]) e[p] = {images:0, cost:0};
+    e[p].images += r.images; e[p].cost += r.allocated_cost;
+  }
+  _piCache = m; _piSrc = S.products;
+  return m;
+}
 function arrProductsOf(t){
   return [...new Set((t.products || "").split(", ")
     .map(s => s.trim()).filter(Boolean).map(prodLabel))]
@@ -1689,12 +1711,19 @@ function arrShare(t, product){
               never divides full cost by a partial vehicle count */
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(),
   images:0, imagesAcc:0, vinImages:0, cost:0, vins:0, costWithVins:0,
+  byProd: {Images:{images:0,cost:0}, Video:{images:0,cost:0}, "360":{images:0,cost:0}},
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
 function addAgg(x, t){
   x.ents.add(t.enterprise); x.roofs.add(t.team_id);
   x.images += t.images;
   x.imagesAcc += t.images_acc;      // the Images product line on its own
+  const pi = productIndex().get(t.team_id + "|" + t.month_key);
+  if (pi) for (const p of ARR_PRODUCTS){
+    if (!pi[p]) continue;
+    x.byProd[p].images += pi[p].images;
+    x.byProd[p].cost   += pi[p].cost;
+  }
   x.cost += t.allocated_cost;
   if (t.vin_images || t.vins){
     x.vinImages += t.vin_images;
@@ -1712,12 +1741,17 @@ function addAgg(x, t){
    ARR-covered work. Sharing one denominator would inflate whichever is thinner. */
 const deriveAgg = x => ({...x,
   ents: x.ents.size, roofs: x.roofs.size,
-  cpi: x.images ? x.cost/x.images : null,
+  /* Each product gets its own rate off its own cost and volume. The blended
+     figure hid a 20x gap between a still and a video. */
+  cpi:          x.byProd.Images.images ? x.byProd.Images.cost/x.byProd.Images.images : null,
+  costPerSpin:  x.byProd["360"].images ? x.byProd["360"].cost/x.byProd["360"].images : null,
+  costPerVideo: x.byProd.Video.images  ? x.byProd.Video.cost/x.byProd.Video.images   : null,
   /* Vehicles are photographed for the Images line; Video and 360 are separate
      deliverables against the same cars. Dividing all three by the vehicle count
      would overstate how many stills each car actually gets. */
   imagesPerVin: x.vins ? x.imagesAcc/x.vins : null,
-  costPerVin: x.vins ? x.costWithVins/x.vins : null,
+  // vehicles are photographed for the Images line, so this divides that cost
+  costPerVin: x.vins ? x.byProd.Images.cost/x.vins : null,
   costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
   // what's left of ARR after the cost of serving it
   margin: x.arrMonth ? (x.arrMonth - x.costWithArr)/x.arrMonth*100 : null,
@@ -1749,7 +1783,9 @@ function productView(){
   const f = F();
   const ids = new Set(teamView().map(t => t.team_id));
   return S.products.filter(p =>
-    (!f.month || p.month_key === f.month) && ids.has(p.team_id));
+    (!f.month || p.month_key === f.month) &&
+    (!f.prod  || prodLabel(p.product) === f.prod) &&
+    ids.has(p.team_id));
 }
 
 const prodBlank = key => ({key, ents:new Set(), roofs:new Set(),
@@ -1765,8 +1801,13 @@ const prodDone = x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
 /* Image counts per product line, for the Volume cards. Same scope as the
    product table so the cards and the table can't disagree. */
 function productTotals(){
+  /* Reads every product for the rooftops in view, not just the selected one,
+     so the volume cards can show what's excluded rather than silently omitting it. */
+  const f = F(), ids = new Set(teamView().map(t => t.team_id));
   const out = { Images:0, "360":0, Video:0, total:0 };
-  for (const r of productView()){
+  for (const r of S.products){
+    if (f.month && r.month_key !== f.month) continue;
+    if (!ids.has(r.team_id)) continue;
     const k = prodLabel(r.product);
     if (k in out) out[k] += r.images;
     out.total += r.images;
@@ -1830,6 +1871,8 @@ function segmentTable(teams, T){
       <td>${r.imagesPerVin == null ? DASH : dec(r.imagesPerVin,1)}</td>
       <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
       <td>${r.costPerVin == null ? DASH : money(r.costPerVin)}</td>
+      <td>${r.costPerSpin == null ? DASH : money(r.costPerSpin)}</td>
+      <td>${r.costPerVideo == null ? DASH : money(r.costPerVideo)}</td>
       <td>${r.costToServe == null ? DASH : dec(r.costToServe,1) + "%"}</td>
       <td>${r.margin == null ? DASH
         : `<span style="color:${r.margin < 0 ? "var(--cost-high)" : "inherit"}">`
@@ -1839,6 +1882,7 @@ function segmentTable(teams, T){
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Segment</th><th>Enterprises</th><th>Rooftops</th><th>VINs</th>
       <th>Images</th><th>Images / VIN</th><th>Cost / image</th><th>Cost / VIN</th>
+      <th>Cost / spin</th><th>Cost / video</th>
       <th>Cost to serve</th><th>Margin</th><th>True accuracy</th></tr></thead>
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
@@ -1868,6 +1912,8 @@ const DRILL = {
       ["cost",        "Delivery cost", "money"],
       ["cpi",         "Cost / image",  "money"],
       ["costPerVin",  "Cost / VIN",    "money"],
+      ["costPerSpin", "Cost / spin",   "money"],
+      ["costPerVideo","Cost / video",  "money"],
       ["costToServe", "Cost to serve", "pct"],
       ["margin",      "Margin",        "pct"],
       ["acc",         "True accuracy", "acc"]
@@ -2093,6 +2139,12 @@ function activeProducts(){
 }
 
 function renderChips(){
+  const f = F();
+  if (f.prod){
+    el("trend-products").innerHTML =
+      `<span class="status">locked to ${esc(f.prod)} by the Product filter</span>`;
+    return;
+  }
   const all = trendProductList(), on = activeProducts();
   el("trend-products").innerHTML = all.map(p =>
     `<button class="chip-btn${on.has(p) ? " on" : ""}" data-p="${esc(p)}">`
@@ -2117,8 +2169,9 @@ function renderTrend(rows, teams, T, scoped){
   const svg = el("chart-trend");
   renderChips();
   const grain = S.trendGrain || "day";
-  const on = activeProducts();
   const f = F();
+  // the Product dropdown wins over the chips, so the two can't disagree
+  const on = f.prod ? new Set([f.prod]) : activeProducts();
 
   /* S.trend has no team dimension, so an account filter can't scope it. The
      monthly team rows can, so the chart switches to those and the product tags
@@ -2162,7 +2215,12 @@ function renderTrend(rows, teams, T, scoped){
     ? `${pts.length} ${grain}s · ${int(pts.reduce((a,d)=>a+d.images,0))} images`
       + (grain === "month" && f.month ? " · all months" : "")
     : "";
-  if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
+  if (!pts.length){
+    svg.innerHTML = "";
+    svg.setAttribute("height", 0);
+    el("trend-n").textContent = "nothing in this selection";
+    return;
+  }
 
   const W = svg.clientWidth || 1160, H = 340;
   const padL = 60, padR = 58, padT = 40, padB = 46;
@@ -2205,11 +2263,13 @@ function renderTrend(rows, teams, T, scoped){
     return out;
   }).join("");
 
-  s += `<path d="M${cx(0)},${padT+plotH} `
-     + pts.map((d,i) => `L${cx(i)},${cy(d.cpi)}`).join(" ")
-     + ` L${cx(pts.length-1)},${padT+plotH} Z" fill="url(#lineGrad)"/>`;
-  s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" `
-     + `stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  if (pts.length > 1){
+    s += `<path d="M${cx(0)},${padT+plotH} `
+       + pts.map((d,i) => `L${cx(i)},${cy(d.cpi)}`).join(" ")
+       + ` L${cx(pts.length-1)},${padT+plotH} Z" fill="url(#lineGrad)"/>`;
+    s += `<polyline points="${pts.map((d,i)=>`${cx(i)},${cy(d.cpi)}`).join(" ")}" fill="none" `
+       + `stroke="var(--ink)" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>`;
+  }
 
   const lo = Math.min(...pts.map(d=>d.cpi)), hi = Math.max(...pts.map(d=>d.cpi));
   const loI = pts.findIndex(d=>d.cpi===lo), hiI = pts.findIndex(d=>d.cpi===hi);
