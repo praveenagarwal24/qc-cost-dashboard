@@ -443,7 +443,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v10 · 27 Aug 2026";
+const VERSION = "v11 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1252,31 +1252,47 @@ function renderMonths(T){
     (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
     (!f.roof  || r.team_name.toLowerCase() === f.roof));
 
+  /* Two rates on one chart. Cost per image spans all products; cost per VIN is
+     Images-only when VINs come from ai_accuracy, so each keeps its own base and
+     its own axis rather than being forced onto a shared scale. */
   const m = new Map();
   for (const t of scope){
-    const d = m.get(t.month_key) || {key:t.month_key, images:0, priced:0, cost:0};
+    const d = m.get(t.month_key) ||
+      {key:t.month_key, images:0, priced:0, cost:0, vins:0, costWithVins:0};
     d.images += t.images; d.priced += t.images - t.unpriced_images;
     d.cost += t.allocated_cost;
+    const vc = vinsOf(t);
+    if (vc){ d.vins += vc; d.costWithVins += vinBase(t).cost; }
     m.set(t.month_key, d);
   }
   const pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key))
-    .map(d => ({...d, cpi: d.priced ? d.cost/d.priced : 0}));
+    .map(d => ({...d,
+      cpi: d.priced ? d.cost/d.priced : 0,
+      cpv: d.vins ? d.costWithVins/d.vins : null }));
 
   el("months-label").textContent = pts.length
-    ? `Cost per image by month · ${pts.length} months` : "Cost per image by month";
+    ? `Cost by month · ${pts.length} months` : "Cost by month";
   if (!pts.length){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
-  const W = svg.clientWidth || 560, H = 132, padT = 20, padB = 30;
+  const hasVin = pts.some(d => d.cpv != null);
+  const W = svg.clientWidth || 560, H = hasVin ? 178 : 132;
+  const padT = hasVin ? 46 : 20, padB = 30;
   const plotH = H - padT - padB;
-  const max = Math.max(...pts.map(d => d.cpi)) * 1.18 || 1;
-  const step = W / pts.length, bw = Math.min(46, step - 10);
+  const maxCpi = Math.max(...pts.map(d => d.cpi)) * 1.15 || 1;
+  const maxCpv = Math.max(...pts.map(d => d.cpv || 0)) * 1.35 || 1;
+  const step = W / pts.length, bw = Math.min(44, step - 12);
   const cx = i => i*step + step/2;
+  const yv = v => padT + plotH - (v/maxCpv)*plotH*0.72;
   const sel = f.month;
 
-  const bars = pts.map((d,i) => {
-    const hgt = Math.max(2, d.cpi/max*plotH);
+  let s = `<line x1="0" y1="${padT+plotH}" x2="${W}" y2="${padT+plotH}" stroke="var(--rule)"/>`;
+
+  s += pts.map((d,i) => {
+    const hgt = Math.max(2, d.cpi/maxCpi*plotH);
     const on = !sel || sel === d.key;
-    return `<g><title>${d.key} · ${money(d.cpi)} per image · ${int(d.images)} images</title>`
+    return `<g><title>${d.key}\n${money(d.cpi)} per image`
+      + `${d.cpv != null ? "\n" + money(d.cpv) + " per VIN" : ""}`
+      + `\n${int(d.images)} images</title>`
       + `<rect x="${cx(i)-bw/2}" y="${padT+plotH-hgt}" width="${bw}" height="${hgt}" rx="2" `
       + `fill="${costColor(d.cpi/(T.blended||1))}" opacity="${on ? .9 : .22}"/>`
       + `<text x="${cx(i)}" y="${padT+plotH-hgt-6}" text-anchor="middle" `
@@ -1286,9 +1302,31 @@ function renderMonths(T){
       + `font-size="10" fill="var(--steel-light)">${d.key.slice(2)}</text></g>`;
   }).join("");
 
+  if (hasVin){
+    const line = pts.filter(d => d.cpv != null);
+    s += `<polyline points="${line.map(d => `${cx(pts.indexOf(d))},${yv(d.cpv)}`).join(" ")}" `
+       + `fill="none" stroke="var(--steel)" stroke-width="1.6" stroke-dasharray="4 3" `
+       + `stroke-linejoin="round"/>`;
+    s += line.map(d => {
+      const i = pts.indexOf(d), on = !sel || sel === d.key;
+      return `<circle cx="${cx(i)}" cy="${yv(d.cpv)}" r="3.4" fill="var(--card)" `
+        + `stroke="var(--steel)" stroke-width="1.6" opacity="${on ? 1 : .3}"/>`
+        + `<text x="${cx(i)}" y="${yv(d.cpv)-9}" text-anchor="middle" `
+        + `font-family="IBM Plex Mono" font-size="10.5" font-weight="500" `
+        + `fill="${on ? "var(--steel)" : "var(--steel-light)"}">${money(d.cpv)}</text>`;
+    }).join("");
+
+    s += `<rect x="0" y="6" width="11" height="9" rx="2" fill="var(--cost-mid)" opacity=".75"/>`
+       + `<text x="16" y="14" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / image</text>`
+       + `<line x1="98" y1="11" x2="114" y2="11" stroke="var(--steel)" stroke-width="1.6" stroke-dasharray="4 3"/>`
+       + `<circle cx="106" cy="11" r="3.4" fill="var(--card)" stroke="var(--steel)" stroke-width="1.6"/>`
+       + `<text x="120" y="14" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN`
+       + `${CONFIG.vinSource === "sku" ? "" : " (" + esc(CONFIG.accuracyProduct) + ")"}</text>`;
+  }
+
   svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
   svg.setAttribute("height", H);
-  svg.innerHTML = `<line x1="0" y1="${padT+plotH}" x2="${W}" y2="${padT+plotH}" stroke="var(--rule)"/>` + bars;
+  svg.innerHTML = s;
 }
 
 function renderKpis(T, scoped, teams){
