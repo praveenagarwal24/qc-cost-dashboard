@@ -497,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v28 · 27 Aug 2026";
+const VERSION = "v29 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -2014,9 +2014,16 @@ function renderChips(){
     + `<span class="dot" style="background:${productColor(p)}"></span>${esc(p)}</button>`).join("");
   el("trend-products").querySelectorAll(".chip-btn").forEach(b =>
     b.addEventListener("click", () => {
-      const cur = new Set(activeProducts()), p = b.dataset.p;
-      cur.has(p) ? cur.delete(p) : cur.add(p);
-      S.trendProducts = cur.size ? cur : null;   // never leave the chart empty
+      const p = b.dataset.p, cur = new Set(activeProducts());
+      if (cur.size === all.length){
+        S.trendProducts = new Set([p]);          // all on -> solo the one clicked
+      }else if (cur.has(p)){
+        if (cur.size === 1) return;              // can't switch the last one off
+        cur.delete(p); S.trendProducts = cur;
+      }else{
+        cur.add(p);
+        S.trendProducts = cur.size === all.length ? null : cur;
+      }
       render();
     }));
 }
@@ -2044,9 +2051,11 @@ function renderTrend(rows, teams, T, scoped){
     el("trend-products").innerHTML =
       `<span class="status">product split unavailable under an account filter</span>`;
   }else{
+    /* At month grain the point is the trajectory, so the month filter is
+       ignored — picking August otherwise collapses the chart to one bar. */
     const m = new Map();
     for (const r of S.trend){
-      if (f.month && !r.work_date.startsWith(f.month)) continue;
+      if (grain !== "month" && f.month && !r.work_date.startsWith(f.month)) continue;
       const p = prodLabel(r.product);
       if (!on.has(p)) continue;
       const k = bucketOf(r.work_date, grain);
@@ -2066,6 +2075,7 @@ function renderTrend(rows, teams, T, scoped){
     : grain === "week" ? "Weekly output and rate" : "Monthly output and rate";
   el("trend-n").textContent = pts.length
     ? `${pts.length} ${grain}s · ${int(pts.reduce((a,d)=>a+d.images,0))} images`
+      + (grain === "month" && f.month ? " · all months" : "")
     : "";
   if (pts.length < 2){ svg.innerHTML = ""; svg.setAttribute("height", 0); return; }
 
@@ -2124,12 +2134,29 @@ function renderTrend(rows, teams, T, scoped){
     + `stroke="var(--ink)" stroke-width="1.5"/>`).join("");
 
   const gap = Math.max(1, Math.ceil(pts.length / Math.max(4, Math.floor(pw/64))));
+  const labelled = i => i===loI || i===hiI || i%gap===0 || i===pts.length-1;
+
+  // rate labels ride above the line
   s += pts.map((d,i) => {
-    if (!(i===loI || i===hiI || i%gap===0 || i===pts.length-1)) return "";
+    if (!labelled(i)) return "";
     const strong = i===loI || i===hiI;
     return `<text x="${cx(i)}" y="${cy(d.cpi)-10}" text-anchor="middle" `
       + `font-family="IBM Plex Mono" font-size="${strong?11:10}" font-weight="${strong?600:400}" `
       + `fill="${strong ? costColor(d.cpi/(T.blended||1)) : "var(--steel)"}">${money(d.cpi)}</text>`;
+  }).join("");
+
+  /* Volume labels sit inside the top of each bar rather than above it, so they
+     never collide with the rate line — the two series share an x axis but not a
+     y scale, and the line frequently crosses where a label above the bar would go. */
+  const barGap = Math.max(1, Math.ceil(pts.length / Math.max(3, Math.floor(pw/78))));
+  s += pts.map((d,i) => {
+    if (!(i % barGap === 0 || i === pts.length-1)) return "";
+    const top = yImg(d.images), hgt = padT + plotH - top;
+    const inside = hgt > 26;
+    return `<text x="${cx(i)}" y="${inside ? top+15 : top-6}" text-anchor="middle" `
+      + `font-family="IBM Plex Mono" font-size="10" font-weight="500" `
+      + `fill="${inside ? "var(--card)" : "var(--steel-light)"}" `
+      + `opacity="${inside ? .95 : .8}">${int(d.images)}</text>`;
   }).join("");
 
   s += pts.map((d,i) => {
