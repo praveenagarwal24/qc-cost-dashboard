@@ -235,7 +235,10 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums}
 .drilltab th:first-child,.drilltab td:first-child{text-align:left;padding-left:var(--pad)}
 .drilltab th:nth-child(2),.drilltab td:nth-child(2){text-align:left}
-.drilltab td:first-child,.drilltab td:nth-child(2){font-family:"IBM Plex Sans",sans-serif}
+.drilltab td:first-child,.drilltab td:nth-child(3){font-family:"IBM Plex Sans",sans-serif}
+.drilltab th:nth-child(3),.drilltab td:nth-child(3),
+.drilltab th:nth-child(4),.drilltab td:nth-child(4){text-align:left}
+.idcell{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel-light)}
 .drilltab th:last-child,.drilltab td:last-child{padding-right:var(--pad)}
 .drilltab tbody tr:hover td{background:var(--hover)}
 .drilltab tfoot td{position:sticky;bottom:0;z-index:2;background:var(--card);
@@ -460,7 +463,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v21 · 27 Aug 2026";
+const VERSION = "v22 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -689,6 +692,7 @@ SELECT
   w.team_id,
   ANY_VALUE(w.Team_Name)      AS team_name,
   ANY_VALUE(w.Enterprise)     AS enterprise,
+  ANY_VALUE(w.enterprise_id)  AS enterprise_id,
   SUM(w.images)               AS images,
   SUM(IF(pm.rate IS NULL, w.images, 0))         AS unpriced_images,
   SUM(w.sum_target)                             AS sum_target,
@@ -962,6 +966,7 @@ const normProd = o => ({
   month_key:o.month_key||"", product:o.product||"Unspecified",
   team_id:(o.team_id||"").toLowerCase(),
   team_name:o.team_name||"—", enterprise:o.enterprise||"—",
+  enterprise_id:o.enterprise_id||"",
   images:num(o.images)||0,
   unpriced_images:num(o.unpriced_images)||0,
   sum_target:num(o.sum_target)||0,
@@ -1565,11 +1570,11 @@ function productView(){
 }
 
 const prodBlank = key => ({key, ents:new Set(), roofs:new Set(),
-  images:0, priced:0, cost:0});
+  images:0, priced:0, cost:0, target:0});
 function prodPush(x, r){
   x.ents.add(r.enterprise); x.roofs.add(r.team_id);
   x.images += r.images; x.priced += r.images - r.unpriced_images;
-  x.cost += r.allocated_cost;
+  x.cost += r.allocated_cost; x.target += r.sum_target;
 }
 const prodDone = x => ({...x, ents:x.ents.size, roofs:x.roofs.size,
   cpi: x.priced ? x.cost/x.priced : null });
@@ -1605,13 +1610,14 @@ function productTable(){
       <td>${isTotal ? r.key : `<span class="tag">${esc(r.key)}</span>`}</td>
       <td>${int(r.ents)}</td><td>${int(r.roofs)}</td>
       <td>${int(r.images)}</td>
+      <td>${dec(r.target,0)}</td>
       <td>${money(r.cost)}</td>
       <td>${r.cpi == null ? DASH : money(r.cpi)}</td>
       <td>${allR.images ? dec(r.images/allR.images*100,1) + "%" : DASH}</td></tr>`;
 
   return `<div class="segwrap"><table class="segtab">
     <thead><tr><th>Product</th><th>Enterprises</th><th>Rooftops</th>
-      <th>Images</th><th>Delivery cost</th><th>Cost / image</th>
+      <th>Images</th><th>Sum target</th><th>Delivery cost</th><th>Cost / image</th>
       <th>Share of images</th></tr></thead>
     <tbody>${out.map(r => line(r, false)).join("")}
       ${line(allR, true)}</tbody>
@@ -1664,8 +1670,10 @@ const DRILL = {
   segment: {
     eyebrow: "Segment",
     cols: [
-      ["enterprise",  "Enterprise",    "text"],
-      ["rooftop",     "Rooftop",       "text"],
+      ["enterprise",    "Enterprise",    "text"],
+      ["enterprise_id", "Enterprise ID", "id"],
+      ["rooftop",       "Rooftop",       "text"],
+      ["team_id",       "Team ID",       "id"],
       ["vins",        "VINs",          "int"],
       ["images",      "Images",        "int"],
       ["imagesPerVin","Images / VIN",  "dec"],
@@ -1683,11 +1691,14 @@ const DRILL = {
   product: {
     eyebrow: "Product delivered",
     cols: [
-      ["enterprise",  "Enterprise",    "text"],
-      ["rooftop",     "Rooftop",       "text"],
-      ["images",      "Images",        "int"],
-      ["cost",        "Delivery cost", "money"],
-      ["cpi",         "Cost / image",  "money"]
+      ["enterprise",    "Enterprise",    "text"],
+      ["enterprise_id", "Enterprise ID", "id"],
+      ["rooftop",       "Rooftop",       "text"],
+      ["team_id",       "Team ID",       "id"],
+      ["images",        "Images",        "int"],
+      ["target",        "Sum target",    "dec"],
+      ["cost",          "Delivery cost", "money"],
+      ["cpi",           "Cost / image",  "money"]
     ],
     find: "Find rooftop\u2026",
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
@@ -1721,7 +1732,8 @@ function segmentDrill(key){
   for (const t of scope){
     let x = m.get(t.team_id);
     if (!x) m.set(t.team_id, x = Object.assign(blankAgg(t.team_id),
-      {enterprise:t.enterprise, rooftop:t.team_name}));
+      {enterprise:t.enterprise, enterprise_id:t.enterprise_id,
+       rooftop:t.team_name, team_id:t.team_id}));
     addAgg(x, t); addAgg(all, t);
   }
   return { rows:[...m.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
@@ -1758,7 +1770,8 @@ function productDrill(key){
   for (const r of rows){
     let x = m.get(r.team_id);
     if (!x) m.set(r.team_id, x = Object.assign(prodBlank(r.team_id),
-      {enterprise:r.enterprise, rooftop:r.team_name}));
+      {enterprise:r.enterprise, enterprise_id:r.enterprise_id,
+       rooftop:r.team_name, team_id:r.team_id}));
     prodPush(x, r); prodPush(all, r);
   }
   return { rows:[...m.values()].map(prodDone), total:prodDone(all), unit:"rooftops" };
@@ -1768,6 +1781,9 @@ function productDrill(key){
 function fmtDrill(r, key, kind){
   const v = r[key];
   if (kind === "text")  return esc(v || "\u2014");
+  if (kind === "id")    return v
+    ? `<span class="idcell">${esc(v)}</span>`
+    : DASH;
   if (v == null)        return DASH;
   if (kind === "int")   return v ? int(v) : DASH;
   if (kind === "dec")   return dec(v, 1);
@@ -1838,11 +1854,16 @@ function renderDrill(){
         iph: t.hours ? t.images/t.hours : null, cpi: t.priced ? t.cost/t.priced : null};
     }
   }
-  const label = type === "segment"
-    ? [`<td>${esc(foot.key || "All rooftops")}</td>`, `<td>${int(foot.roofs)} rooftops</td>`]
-    : [`<td>${esc(foot.name)}</td>`, `<td>${int(shown.length)} people</td>`];
-  el("drill-tab").querySelector("tfoot").innerHTML = "<tr>" + spec.cols.map(([k,,kind],i) =>
-    i < 2 ? label[i] : `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
+  /* The footer label spans the identity columns, which differ per drill type —
+     it used to say "people" for anything that wasn't a segment. */
+  const idCols = spec.cols.filter(c => c[2] === "text" || c[2] === "id").length;
+  const footLabel = type === "day"
+    ? esc(foot.name) : esc(foot.key || "All rooftops");
+  const footCount = `${int(shown.length)} ${unit}`;
+  el("drill-tab").querySelector("tfoot").innerHTML = "<tr>"
+    + `<td colspan="${idCols}">${footLabel} · ${footCount}</td>`
+    + spec.cols.slice(idCols).map(([k,,kind]) =>
+        `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
 
   el("drill-tab").querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
     const k = th.dataset.k;
