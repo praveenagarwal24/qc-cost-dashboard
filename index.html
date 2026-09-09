@@ -181,6 +181,7 @@ tbody tr:hover td{background:var(--hover)}
 .bar{display:inline-block;height:5px;border-radius:1px;background:var(--rule);vertical-align:middle;margin-right:7px}
 .scoped{padding:12px var(--pad);color:var(--steel);font-size:13px;
   border-bottom:1px solid var(--rule-soft);background:var(--hover)}
+.scoped.est{background:var(--accent-soft);color:var(--ink)}
 
 .alert{border:1px solid var(--rule);background:var(--card);color:var(--ink);
   padding:11px var(--pad);border-radius:var(--radius);margin-bottom:14px;font-size:13px}
@@ -497,7 +498,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v33 · 27 Aug 2026";
+const VERSION = "v34 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -526,6 +527,11 @@ const CONFIG = {
   // duplicates and keeps the largest. A duplicate under "sum" inflates that
   // month's delivery cost by the whole extra amount.
   duplicatePay: "sum",
+
+  // Payroll for a month is only final around the 5th of the next month, so the
+  // newest month has no salary rows. When true, each person's most recent known
+  // salary is carried forward as an estimate and flagged as such on the page.
+  carryForwardSalary: true,
 
   // ARR lives in the `arr` table with no currency column. Delivery cost is INR
   // salary, so the two can only be compared once ARR is converted. Set this to
@@ -611,23 +617,54 @@ pm_volume AS (
          COUNT(DISTINCT Hourly_Date) AS month_hours
   FROM work GROUP BY qc_email, qc_local, month_key
 ),
-pm AS (
+pm_joined AS (
   SELECT
-    v.qc_email, v.month_key, v.month_images, v.month_target, v.month_hours,
-    s.salary                                                  AS month_salary,
-    s.pay_rows                                                AS pay_rows,
-    s.salary_sum - s.salary_max                               AS pay_inflation,
-    COALESCE(s.name, INITCAP(REPLACE(v.qc_local, '.', ' ')))  AS name,
-    s.emp_no                                                  AS emp_no,
-    IF(s.salary IS NULL, 'none', 'email')                     AS match_type,
-    -- A month's salary spread over that month's Sum_Target, so the rate is
-    -- cost per unit of target rather than cost per image. Work with a higher
-    -- target per image — a 360 spin against a still — now costs more.
-    SAFE_DIVIDE(s.salary, NULLIF(v.month_target, 0))          AS rate
+    v.qc_email, v.qc_local, v.month_key,
+    v.month_images, v.month_target, v.month_hours,
+    s.salary AS actual_salary, s.name, s.emp_no,
+    s.pay_rows, s.salary_sum, s.salary_max
   FROM pm_volume v
   LEFT JOIN sal_email s
     ON  s.month_key = v.month_key
     AND s.email     = v.qc_email
+),
+/* Payroll for a month isn't final until about the 5th of the next one, so the
+   newest month always joins to nothing and its work would cost zero. Each person
+   therefore carries their most recent known salary forward until the real figure
+   lands. salary_basis records which months are estimated. */
+pm_filled AS (
+  SELECT *,
+    LAST_VALUE(actual_salary IGNORE NULLS) OVER w AS carried_salary,
+    LAST_VALUE(IF(actual_salary IS NULL, NULL, month_key) IGNORE NULLS) OVER w AS salary_month,
+    LAST_VALUE(name IGNORE NULLS)  OVER w AS carried_name,
+    LAST_VALUE(emp_no IGNORE NULLS) OVER w AS carried_emp_no
+  FROM pm_joined
+  WINDOW w AS (PARTITION BY qc_email ORDER BY month_key
+               ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW)
+),
+pm AS (
+  SELECT
+    f.qc_email, f.month_key, f.month_images, f.month_target, f.month_hours,
+    ${CONFIG.carryForwardSalary ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
+                                                              AS month_salary,
+    f.actual_salary                                           AS actual_salary,
+    CASE WHEN f.actual_salary IS NOT NULL THEN 'actual'
+         WHEN ${CONFIG.carryForwardSalary ? "f.carried_salary IS NOT NULL" : "FALSE"} THEN 'carried'
+         ELSE 'none' END                                      AS salary_basis,
+    IF(f.actual_salary IS NULL, f.salary_month, NULL)         AS salary_from_month,
+    f.pay_rows                                                AS pay_rows,
+    f.salary_sum - f.salary_max                               AS pay_inflation,
+    COALESCE(f.name, f.carried_name,
+             INITCAP(REPLACE(f.qc_local, '.', ' ')))          AS name,
+    COALESCE(f.emp_no, f.carried_emp_no)                      AS emp_no,
+    IF(f.actual_salary IS NULL AND f.carried_salary IS NULL, 'none', 'email') AS match_type,
+    -- A month's salary spread over that month's Sum_Target, so the rate is
+    -- cost per unit of target rather than cost per image. Work with a higher
+    -- target per image — a 360 spin against a still — now costs more.
+    SAFE_DIVIDE(
+      ${CONFIG.carryForwardSalary ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"},
+      NULLIF(f.month_target, 0))                              AS rate
+  FROM pm_filled f
 )`;
 
 const SQL_A = SHARED + `,
@@ -642,7 +679,8 @@ SELECT
   d.month_key, d.qc_email AS email, pm.name, pm.emp_no, pm.match_type,
   CAST(d.work_date AS STRING) AS work_date,
   d.hours, d.images, d.sum_target, d.tool_count, d.sku_count,
-  pm.month_salary, pm.pay_rows, pm.pay_inflation,
+  pm.month_salary, pm.salary_basis, pm.salary_from_month,
+  pm.pay_rows, pm.pay_inflation,
   pm.month_images, pm.month_target, pm.month_hours,
   ROUND(d.sum_target * pm.rate, 4) AS allocated_cost
 FROM daily d
@@ -1019,6 +1057,7 @@ const normDaily = o => ({
   tool_count:num(o.tool_count)||0, sku_count:num(o.sku_count)||0,
   sum_target:num(o.sum_target)||0,
   month_salary:num(o.month_salary),
+  salary_basis:o.salary_basis||"none", salary_from_month:o.salary_from_month||"",
   pay_rows:num(o.pay_rows)||0, pay_inflation:num(o.pay_inflation)||0,
   month_images:num(o.month_images)||0,
   month_target:num(o.month_target)||0,
@@ -1265,6 +1304,7 @@ function byPersonMonth(rows){
     let p = m.get(k);
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
       match_type:r.match_type, salary:r.month_salary,
+      salary_basis:r.salary_basis, salary_from_month:r.salary_from_month,
       pay_rows:r.pay_rows, pay_inflation:r.pay_inflation,
       images:0, target:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
     p.images += r.images; p.target += r.sum_target; p.hours += r.hours; p.days += 1;
@@ -1398,8 +1438,24 @@ function markActive(){
     .forEach(id => el(id).classList.toggle("on", !!val(id)));
 }
 
+/* If everything in view is running on carried salary, say so where the numbers
+   are, not only in the coverage line. */
+function renderEstimateNote(){
+  const f = F();
+  const rows = dailyView();
+  if (!rows.length) return "";
+  const carried = rows.filter(r => r.salary_basis === "carried");
+  if (!carried.length) return "";
+  const share = carried.reduce((a,r) => a + r.images, 0)
+    / Math.max(1, rows.reduce((a,r) => a + r.images, 0)) * 100;
+  const months = [...new Set(carried.map(r => r.month_key))].sort();
+  return `<div class="scoped est">Salary is estimated for ${months.map(esc).join(", ")} —
+    carried from the previous month, since payroll lands around the 5th.
+    ${dec(share,0)}% of the images in view are costed this way.</div>`;
+}
+
 function renderScope(teams, scoped){
-  if (!scoped){ el("scope-note").innerHTML = ""; return; }
+  if (!scoped){ el("scope-note").innerHTML = renderEstimateNote(); return; }
   const f = F();
   const bits = [];
   if (f.ent)  bits.push(`enterprise <b>${esc(val("f-ent"))}</b>`);
@@ -1410,7 +1466,8 @@ function renderScope(teams, scoped){
   if (f.stage) bits.push(`stage <b>${esc(f.stage)}</b>`);
   if (f.prod)  bits.push(`product <b>${esc(f.prod)}</b> (delivered)`);
   if (f.ver)   bits.push(`version <b>${esc(f.ver)}</b>`);
-  el("scope-note").innerHTML = `<div class="scoped">Scoped to ${bits.join(", ")} — `
+  el("scope-note").innerHTML = renderEstimateNote()
+    + `<div class="scoped">Scoped to ${bits.join(", ")} — `
     + `${int(new Set(teams.map(t=>t.team_id)).size)} rooftops, ${int(teams.length)} team-months. `
     + `Every figure below counts only the reviewers who logged work here.</div>`;
 }
@@ -2347,6 +2404,7 @@ function fillRooftops(){
 }
 
 function coverage(){
+  const T0 = totals(byPersonMonth(S.daily), S.teams, false);
   const pms = byPersonMonth(S.daily);
   const unpriced = pms.filter(p => p.cpi == null);
   const noAcc = S.teams.filter(t => t.true_accuracy == null);
@@ -2399,20 +2457,39 @@ function coverage(){
         .map(([k,v]) => `${esc(k)} — ${int(v)} images`).join("</li><li>")}</li></ul></div>`);
   }
 
-  /* Months present in delivery data but absent from salary_sheet produce zero
-     cost for real work — worth naming the month rather than showing a silent 0. */
-  const salMonths = new Set(S.daily.filter(d => d.month_salary != null).map(d => d.month_key));
-  const gapMonths = [...new Set(S.daily.map(d => d.month_key))]
-    .filter(m => !salMonths.has(m)).sort();
-  if (gapMonths.length){
-    const lost = S.daily.filter(d => gapMonths.includes(d.month_key))
-      .reduce((a,d) => a + d.images, 0);
-    chips.push(`${gapMonths.length} month${gapMonths.length>1?"s":""} with no salary data`);
-    items.push(`<div class="cov-item"><b>No salary rows at all for
-      ${gapMonths.map(esc).join(", ")}.</b> ${int(lost)} images were delivered in
-      ${gapMonths.length>1?"those months":"that month"}, but every cost figure for
-      ${gapMonths.length>1?"them":"it"} is zero — delivery cost, cost per image and cost per VIN
-      included. Volume is real; cost is missing until salary_sheet is extended.</div>`);
+  /* Which months are running on carried salary, and which have nothing at all. */
+  const pmAll = byPersonMonth(S.daily);
+  const carried = new Map(), none = new Map();
+  for (const p of pmAll){
+    const bag = p.salary_basis === "carried" ? carried
+              : p.salary_basis === "none" ? none : null;
+    if (!bag) continue;
+    const e = bag.get(p.month_key) || {cost:0, images:0, people:0, from:new Set()};
+    e.cost += p.cost; e.images += p.images; e.people++;
+    if (p.salary_from_month) e.from.add(p.salary_from_month);
+    bag.set(p.month_key, e);
+  }
+  if (carried.size){
+    const total = [...carried.values()].reduce((a,e) => a + e.cost, 0);
+    const share = T0.cost ? total/T0.cost*100 : 0;
+    chips.push(`${carried.size} month${carried.size>1?"s":""} on carried salary`);
+    items.push(`<div class="cov-item"><b>Salary is estimated for
+      ${[...carried.keys()].sort().map(esc).join(", ")}.</b> Payroll for a month lands around the
+      5th of the next one, so each person carries their most recent known salary forward.
+      ${money(total)} of delivery cost (${dec(share,1)}% of the total) rests on that estimate —
+      accurate if headcount and pay held steady, wrong by whatever changed.
+      <ul><li>${[...carried.entries()].sort().map(([m,e]) =>
+        `${esc(m)} — ${e.people} people, ${int(e.images)} images, ${money(e.cost)} estimated`
+        + (e.from.size ? ` (from ${[...e.from].sort().join(", ")})` : "")
+      ).join("</li><li>")}</li></ul>
+      Set carryForwardSalary to false in CONFIG to leave those months at zero instead.</div>`);
+  }
+  if (none.size){
+    const lost = [...none.values()].reduce((a,e) => a + e.images, 0);
+    chips.push(`${none.size} month${none.size>1?"s":""} with no salary at all`);
+    items.push(`<div class="cov-item"><b>No salary — actual or carried — for
+      ${[...none.keys()].sort().map(esc).join(", ")}.</b> ${int(lost)} images carry zero cost.
+      These are people with no earlier month to carry from.</div>`);
   }
 
   /* Where ai_accuracy's own image count and delivery's Images-product count
