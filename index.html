@@ -498,7 +498,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v34 · 27 Aug 2026";
+const VERSION = "v35 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -532,6 +532,13 @@ const CONFIG = {
   // newest month has no salary rows. When true, each person's most recent known
   // salary is carried forward as an estimate and flagged as such on the page.
   carryForwardSalary: true,
+
+  // The newest month is always partial — data runs to the last sync, not to the
+  // month end. Charging a whole month's salary against a few days of output
+  // inflates every rate. When true, salary is scaled by the share of the month
+  // the data actually covers. A complete month scales by 1, so this is a no-op
+  // everywhere except the running month.
+  proratePartialMonths: true,
 
   // ARR lives in the `arr` table with no currency column. Delivery cost is INR
   // salary, so the two can only be compared once ARR is converted. Set this to
@@ -617,6 +624,16 @@ pm_volume AS (
          COUNT(DISTINCT Hourly_Date) AS month_hours
   FROM work GROUP BY qc_email, qc_local, month_key
 ),
+/* How much of each calendar month the delivery data actually covers. The last
+   month runs only to the most recent sync, so it needs prorating; every earlier
+   month covers its full span and scales by 1. */
+month_span AS (
+  SELECT
+    month_key,
+    DATE_DIFF(MAX(work_date), DATE_TRUNC(MAX(work_date), MONTH), DAY) + 1 AS days_covered,
+    EXTRACT(DAY FROM LAST_DAY(MAX(work_date)))                           AS days_in_month
+  FROM work GROUP BY month_key
+),
 pm_joined AS (
   SELECT
     v.qc_email, v.qc_local, v.month_key,
@@ -645,7 +662,13 @@ pm_filled AS (
 pm AS (
   SELECT
     f.qc_email, f.month_key, f.month_images, f.month_target, f.month_hours,
-    ${CONFIG.carryForwardSalary ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
+    ms.days_covered, ms.days_in_month,
+    ${CONFIG.proratePartialMonths
+        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"} AS prorate,
+    ROUND(${CONFIG.carryForwardSalary
+        ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
+      * ${CONFIG.proratePartialMonths
+        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"}, 2)
                                                               AS month_salary,
     f.actual_salary                                           AS actual_salary,
     CASE WHEN f.actual_salary IS NOT NULL THEN 'actual'
@@ -662,9 +685,13 @@ pm AS (
     -- cost per unit of target rather than cost per image. Work with a higher
     -- target per image — a 360 spin against a still — now costs more.
     SAFE_DIVIDE(
-      ${CONFIG.carryForwardSalary ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"},
+      ${CONFIG.carryForwardSalary
+        ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
+        * ${CONFIG.proratePartialMonths
+        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"},
       NULLIF(f.month_target, 0))                              AS rate
   FROM pm_filled f
+  JOIN month_span ms USING (month_key)
 )`;
 
 const SQL_A = SHARED + `,
@@ -680,6 +707,7 @@ SELECT
   CAST(d.work_date AS STRING) AS work_date,
   d.hours, d.images, d.sum_target, d.tool_count, d.sku_count,
   pm.month_salary, pm.salary_basis, pm.salary_from_month,
+  pm.prorate, pm.days_covered, pm.days_in_month,
   pm.pay_rows, pm.pay_inflation,
   pm.month_images, pm.month_target, pm.month_hours,
   ROUND(d.sum_target * pm.rate, 4) AS allocated_cost
@@ -1058,6 +1086,8 @@ const normDaily = o => ({
   sum_target:num(o.sum_target)||0,
   month_salary:num(o.month_salary),
   salary_basis:o.salary_basis||"none", salary_from_month:o.salary_from_month||"",
+  prorate:num(o.prorate), days_covered:num(o.days_covered)||0,
+  days_in_month:num(o.days_in_month)||0,
   pay_rows:num(o.pay_rows)||0, pay_inflation:num(o.pay_inflation)||0,
   month_images:num(o.month_images)||0,
   month_target:num(o.month_target)||0,
@@ -1305,6 +1335,7 @@ function byPersonMonth(rows){
     if (!p) m.set(k, p = {email:r.email, name:r.name, emp_no:r.emp_no, month_key:r.month_key,
       match_type:r.match_type, salary:r.month_salary,
       salary_basis:r.salary_basis, salary_from_month:r.salary_from_month,
+      prorate:r.prorate, days_covered:r.days_covered, days_in_month:r.days_in_month,
       pay_rows:r.pay_rows, pay_inflation:r.pay_inflation,
       images:0, target:0, hours:0, days:0, cost:0, priced:r.allocated_cost != null});
     p.images += r.images; p.target += r.sum_target; p.hours += r.hours; p.days += 1;
@@ -1445,13 +1476,28 @@ function renderEstimateNote(){
   const rows = dailyView();
   if (!rows.length) return "";
   const carried = rows.filter(r => r.salary_basis === "carried");
-  if (!carried.length) return "";
-  const share = carried.reduce((a,r) => a + r.images, 0)
-    / Math.max(1, rows.reduce((a,r) => a + r.images, 0)) * 100;
-  const months = [...new Set(carried.map(r => r.month_key))].sort();
-  return `<div class="scoped est">Salary is estimated for ${months.map(esc).join(", ")} —
-    carried from the previous month, since payroll lands around the 5th.
-    ${dec(share,0)}% of the images in view are costed this way.</div>`;
+  const partial = new Map();
+  for (const r of rows)
+    if (r.prorate != null && r.prorate < 0.999)
+      partial.set(r.month_key, r);
+  if (!carried.length && !partial.size) return "";
+
+  const bits = [];
+  if (carried.length){
+    const share = carried.reduce((a,r) => a + r.images, 0)
+      / Math.max(1, rows.reduce((a,r) => a + r.images, 0)) * 100;
+    const months = [...new Set(carried.map(r => r.month_key))].sort();
+    bits.push(`Salary is estimated for ${months.map(esc).join(", ")} — carried from the previous
+      month, since payroll lands around the 5th. ${dec(share,0)}% of the images in view are
+      costed this way.`);
+  }
+  if (partial.size){
+    bits.push([...partial.entries()].sort().map(([m,r]) =>
+      `${esc(m)} covers ${r.days_covered} of ${r.days_in_month} days, so salary is prorated to
+       ${dec(r.prorate*100,0)}% — a full month's pay against a part month would inflate every rate.`
+    ).join(" "));
+  }
+  return `<div class="scoped est">${bits.join(" ")}</div>`;
 }
 
 function renderScope(teams, scoped){
@@ -2484,6 +2530,20 @@ function coverage(){
       ).join("</li><li>")}</li></ul>
       Set carryForwardSalary to false in CONFIG to leave those months at zero instead.</div>`);
   }
+  const pro = new Map();
+  for (const r of S.daily)
+    if (r.prorate != null && r.prorate < 0.999) pro.set(r.month_key, r);
+  if (pro.size){
+    chips.push(`${pro.size} partial month${pro.size>1?"s":""} prorated`);
+    items.push(`<div class="cov-item"><b>${pro.size} month${pro.size>1?"s":""} cover only part of
+      the calendar month, so salary is scaled to match.</b> Without it a whole month's pay would
+      be charged against a few days of output and every rate would read several times too high.
+      <ul><li>${[...pro.entries()].sort().map(([m,r]) =>
+        `${esc(m)} — ${r.days_covered} of ${r.days_in_month} days, salary at ${dec(r.prorate*100,0)}%`
+      ).join("</li><li>")}</li></ul>
+      Set proratePartialMonths to false in CONFIG to charge the full month instead.</div>`);
+  }
+
   if (none.size){
     const lost = [...none.values()].reduce((a,e) => a + e.images, 0);
     chips.push(`${none.size} month${none.size>1?"s":""} with no salary at all`);
