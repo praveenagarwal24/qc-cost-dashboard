@@ -498,7 +498,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v36 · 27 Aug 2026";
+const VERSION = "v38 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1390,7 +1390,7 @@ function rollTeams(rows, keyFn, labelFn){
    for hours and headcount, which have no team-level equivalent. */
 function totals(pms, teams, scoped){
   let vins = 0, images = 0, imagesAcc = 0, vinImages = 0, cost = 0, costWithVins = 0;
-  let arrMonth = 0, costWithArr = 0, churnedCost = 0;
+  let arrMonth = 0, arrFull = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
     images += t.images;
     imagesAcc += t.images_acc;
@@ -1399,7 +1399,12 @@ function totals(pms, teams, scoped){
       vins += t.vins; vinImages += t.vin_images; costWithVins += t.allocated_cost;
     }
     const share = arrShare(t, F().prod || null);
-    if (share){ arrMonth += share; costWithArr += t.allocated_cost; }
+    if (share){
+      arrMonth += share;
+      // the same share before proration — the contracted run-rate, not the period
+      arrFull += share / (t.arr_prorate || 1);
+      costWithArr += t.allocated_cost;
+    }
     if (t.stage === "Churned") churnedCost += t.allocated_cost;
   }
 
@@ -1418,7 +1423,7 @@ function totals(pms, teams, scoped){
 
   const base = {
     vins, images, imagesAcc, vinImages, cost, costWithVins, churnedCost,
-    arrMonth, costWithArr, product: prodSel || null, perVehicle,
+    arrMonth, arrFull, costWithArr, product: prodSel || null, perVehicle,
     // one artefact per car: cost per image would just restate cost per VIN
     blended:      perVehicle ? null : (images ? cost/images : 0),
     imagesPerVin: vins ? imagesAcc/vins : null,
@@ -1432,7 +1437,8 @@ function totals(pms, teams, scoped){
     // reporting a different product's quality against this one's volume
     accuracy: perVehicle ? null : weightedAccuracy(teams),
     accounts: new Set(teams.map(t => t.enterprise)).size,
-    rooftops: new Set(teams.map(t => t.team_id)).size
+    rooftops: new Set(teams.map(t => t.team_id)).size,
+    arrProrated: teams.some(t => (t.arr_prorate ?? 1) < 0.999)
   };
 
   if (scoped){
@@ -1493,8 +1499,9 @@ function renderEstimateNote(){
   }
   if (partial.size){
     bits.push([...partial.entries()].sort().map(([m,r]) =>
-      `${esc(m)} covers ${r.days_covered} of ${r.days_in_month} days, so salary is prorated to
-       ${dec(r.prorate*100,0)}% — a full month's pay against a part month would inflate every rate.`
+      `${esc(m)} covers ${r.days_covered} of ${r.days_in_month} days, so salary and ARR are both
+       prorated to ${dec(r.prorate*100,0)}% — scaling one without the other would make cost to
+       serve look like an improvement when only the periods differ.`
     ).join(" "));
   }
   return `<div class="scoped est">${bits.join(" ")}</div>`;
@@ -1705,8 +1712,12 @@ function renderKpis(T, scoped, teams){
   ];
   const unit = [
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
-      T.product ? `${T.product} share · ARR split per product`
-        : `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
+      /* Prorated to match cost, so cost ÷ ARR equals Cost to serve exactly. The
+         unprorated run-rate is named here so the book value isn't lost. */
+      T.arrProrated && T.arrFull
+        ? `part month · ${money(T.arrFull)} full-month run rate`
+        : T.product ? `${T.product} share · ARR split per product`
+          : `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
       T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
     ["ARR coverage", dec(T.arrCoverage,0) + "%", "rooftops with an ARR row"],
@@ -2602,7 +2613,8 @@ function coverage(){
       <ul><li>${[...pro.entries()].sort().map(([m,r]) =>
         `${esc(m)} — ${r.days_covered} of ${r.days_in_month} days, salary at ${dec(r.prorate*100,0)}%`
       ).join("</li><li>")}</li></ul>
-      Set proratePartialMonths to false in CONFIG to charge the full month instead.</div>`);
+      Salary and ARR are scaled by the same factor, so cost to serve stays comparable month to
+      month. Set proratePartialMonths to false in CONFIG to charge the full month instead.</div>`);
   }
 
   if (none.size){
@@ -2783,10 +2795,25 @@ el("ver").textContent = VERSION;
 
 /* ARR is stored without a currency, so the rate that makes it comparable to INR
    salary belongs in the UI — every margin figure moves with it. */
+/* ARR has to be prorated on exactly the same basis as cost. Charging 9 days of
+   salary against a full month of contracted revenue made cost to serve collapse
+   in the running month — the ratio looked like an improvement when it was only
+   a mismatch of periods. */
+function monthProrate(){
+  const m = new Map();
+  if (!CONFIG.proratePartialMonths) return m;
+  for (const d of S.daily)
+    if (d.prorate != null && !m.has(d.month_key)) m.set(d.month_key, d.prorate);
+  return m;
+}
 function applyFx(rate){
   CONFIG.arrToInr = rate;
-  for (const t of S.teams)
-    t.arr_month = t.contracted_arr ? t.contracted_arr * rate / 12 : null;
+  const mp = monthProrate();
+  for (const t of S.teams){
+    const p = mp.has(t.month_key) ? mp.get(t.month_key) : 1;
+    t.arr_prorate = p;
+    t.arr_month = t.contracted_arr ? t.contracted_arr * rate / 12 * p : null;
+  }
   try { localStorage.setItem("qcFx", String(rate)); } catch(e){}
 }
 try {
