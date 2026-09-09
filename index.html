@@ -497,7 +497,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v32 · 27 Aug 2026";
+const VERSION = "v33 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -558,11 +558,10 @@ const like = (list) => list
 const INCLUDED = like(CONFIG.deliveryDomains);
 
 
-const ACC_MONTH = `FORMAT_DATE('%Y-%m', COALESCE(
-      SAFE.PARSE_DATE("%e %b, %Y", TRIM(Month)),
-      SAFE.PARSE_DATE("%d %b, %Y", TRIM(Month)),
-      SAFE.PARSE_DATE("%b %e, %Y", TRIM(Month)),
-      SAFE.PARSE_DATE("%Y-%m-%d",  TRIM(Month))))`;
+/* ai_accuracy.Month is a DATE. It used to arrive as a string like "1 Apr, 2026",
+   which is why this was a stack of SAFE.PARSE_DATE calls — those now fail with
+   a type error rather than parsing. */
+const ACC_MONTH = `FORMAT_DATE('%Y-%m', Month)`;
 
 const SHARED = `
 WITH work AS (
@@ -668,11 +667,11 @@ arr AS (
   -- 2,728 rows, one or more per team. Collapsed to exactly one before it joins,
   -- and arr_rows carries the duplicate count so a fan-out risk stays visible.
   SELECT
-    LOWER(TRIM(\`Team ID\`))          AS team_id,
+    LOWER(TRIM(Team_ID))              AS team_id,
     ANY_VALUE(Stage)                  AS stage,
-    MAX(\`Contracted Arr\`)           AS contracted_arr,
-    MAX(\`Live Arr\`)                 AS live_arr,
-    ANY_VALUE(Version)                AS version,
+    MAX(Contracted_Arr)               AS contracted_arr,
+    MAX(Live_Arr)                     AS live_arr,
+    ANY_VALUE(Enterprise_Details___Enterprise___Version) AS version,
     ANY_VALUE(ARRAY_TO_STRING(ARRAY(
       SELECT REGEXP_REPLACE(p, r'[^A-Za-z0-9_]', '')
       FROM UNNEST(SPLIT(IFNULL(Products, ''), ',')) p
@@ -680,7 +679,7 @@ arr AS (
     ), ', ')) AS products,
     COUNT(*)                          AS arr_rows
   FROM \`${CONFIG.project}.${CONFIG.dataset}.arr\`
-  WHERE \`Team ID\` IS NOT NULL AND TRIM(\`Team ID\`) != ''
+  WHERE Team_ID IS NOT NULL AND TRIM(Team_ID) != ''
   GROUP BY team_id
 ),
 vin AS (
