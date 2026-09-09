@@ -498,7 +498,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v35 · 27 Aug 2026";
+const VERSION = "v36 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1619,14 +1619,23 @@ function renderMonths(T){
         + `<text x="${xCpi(i)+bw/2}" y="${y(d.cpi)-6}" text-anchor="middle" `
         + `font-family="IBM Plex Mono" font-size="10" `
         + `fill="${dim(d)?"var(--steel-light)":"var(--ink)"}">${money(d.cpi)}</text></g>`;
-      if (d.cpv != null)
-        s += `<g><title>${d.key}\n${money(d.cpv)} per VIN</title>`
+      if (d.cpv != null){
+        // a month whose vin_images sync is behind gets drawn hollow and starred
+        const lag = vinLagging(d.key);
+        s += `<g><title>${d.key}\n${money(d.cpv)} per VIN`
+          + `${lag ? "\n\nvin_images is behind delivery data for this month, so the"
+                   + "\nvehicle count is understated and this rate reads too high." : ""}</title>`
           + `<rect x="${xCpv(i)}" y="${y(d.cpv)}" width="${bw}" `
-          + `height="${padT+plotH-y(d.cpv)}" rx="2" fill="var(--steel)" `
-          + `opacity="${dim(d)?.18:.55}"/>`
+          + `height="${padT+plotH-y(d.cpv)}" rx="2" `
+          + `fill="${lag ? "none" : "var(--steel)"}" `
+          + `stroke="var(--steel)" stroke-width="${lag ? 1.4 : 0}" `
+          + `${lag ? 'stroke-dasharray="3 2" ' : ""}`
+          + `opacity="${dim(d)?.18:(lag?.7:.55)}"/>`
           + `<text x="${xCpv(i)+bw/2}" y="${y(d.cpv)-6}" text-anchor="middle" `
           + `font-family="IBM Plex Mono" font-size="10" `
-          + `fill="${dim(d)?"var(--steel-light)":"var(--steel)"}">${money(d.cpv)}</text></g>`;
+          + `fill="${dim(d)?"var(--steel-light)":"var(--steel)"}">`
+          + `${money(d.cpv)}${lag ? "*" : ""}</text></g>`;
+      }
     });
   }else{
     const cpiPts = pts.map((d,i) => [cx(i), y(d.cpi)]);
@@ -1666,8 +1675,14 @@ function renderMonths(T){
        + `<text x="114" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN`
        + `</text>`;
 
-  svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
-  svg.setAttribute("height", H);
+  const lagged = pts.filter(d => d.cpv != null && vinLagging(d.key)).map(d => d.key);
+  if (lagged.length)
+    s += `<text x="0" y="${H-1}" font-family="IBM Plex Mono" font-size="9.5" `
+       + `fill="var(--steel-light)">* ${lagged.join(", ")}: vin_images behind delivery, `
+       + `cost / VIN reads high</text>`;
+
+  svg.setAttribute("viewBox", `0 0 ${W} ${H + (lagged.length ? 12 : 0)}`);
+  svg.setAttribute("height", H + (lagged.length ? 12 : 0));
   svg.innerHTML = s;
 }
 
@@ -1768,6 +1783,36 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    is a per-row counter, so summing it across hourly rows and products would
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
+
+/* vin_images and delivery_working_data are separate syncs and don't always run
+   to the same day. In a complete month vin_images reports ~1.5-1.9x the images
+   delivery does (it counts uploads, delivery counts QC'd work) and that ratio is
+   stable. When a month's ratio collapses, vin_images is lagging — its vehicle
+   count is understated, and any rate dividing by it reads too high. Comparing
+   each month against the median of the others finds that without hardcoding a
+   month or a cutoff date. */
+let _vcCache = null, _vcSrc = null;
+function vinCoverageByMonth(){
+  if (_vcSrc === S.teams && _vcCache) return _vcCache;
+  const m = new Map();
+  for (const t of S.teams){
+    const e = m.get(t.month_key) || {del:0, vin:0};
+    e.del += t.images; e.vin += t.vin_images || 0;
+    m.set(t.month_key, e);
+  }
+  const ratios = [...m.entries()].map(([k,e]) => [k, e.del ? e.vin/e.del : 0]);
+  const sorted = ratios.map(r => r[1]).filter(r => r > 0).sort((a,b) => a-b);
+  const median = sorted.length
+    ? sorted[Math.floor(sorted.length/2)] : 0;
+  const out = new Map();
+  for (const [k, ratio] of ratios)
+    out.set(k, { ratio, median,
+      coverage: median ? ratio/median : 1,
+      lagging: median > 0 && ratio/median < 0.75 });
+  _vcCache = out; _vcSrc = S.teams;
+  return out;
+}
+const vinLagging = monthKey => !!vinCoverageByMonth().get(monthKey)?.lagging;
 
 /* ARR is contracted per account, not per product, and arr.Products lists what
    the account bought — ['image','video','threeSixty'] and so on. Only those
@@ -2530,6 +2575,22 @@ function coverage(){
       ).join("</li><li>")}</li></ul>
       Set carryForwardSalary to false in CONFIG to leave those months at zero instead.</div>`);
   }
+  const lag = [...vinCoverageByMonth().entries()].filter(([,v]) => v.lagging);
+  if (lag.length){
+    chips.push(`vin_images behind for ${lag.map(([m]) => m).join(", ")}`);
+    items.push(`<div class="cov-item"><b>vin_images is behind delivery_working_data for
+      ${lag.map(([m]) => esc(m)).join(", ")}.</b> In a settled month vin_images reports about
+      ${dec(lag[0][1].median,2)}x the images delivery does — the two count different things and the
+      ratio is steady. Where it drops, vin_images simply hasn't caught up, so the vehicle count is
+      understated and every rate dividing by it reads too high. Cost per VIN is the one affected;
+      cost per image is unaffected because both its numbers come from delivery.
+      <ul><li>${lag.map(([m,v]) =>
+        `${esc(m)} — vin_images at ${dec(v.coverage*100,0)}% of its usual coverage, so cost per VIN
+         is roughly ${dec(1/Math.max(v.coverage,0.01),1)}x too high`
+      ).join("</li><li>")}</li></ul>
+      This clears itself once the vin_images sync catches up.</div>`);
+  }
+
   const pro = new Map();
   for (const r of S.daily)
     if (r.prorate != null && r.prorate < 0.999) pro.set(r.month_key, r);
