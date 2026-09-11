@@ -529,7 +529,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v41 · 27 Aug 2026";
+const VERSION = "v43 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -571,6 +571,13 @@ const CONFIG = {
   // until their real figure lands, at which point the actual takes over on its
   // own. Set to 0 to leave them unpriced instead.
   assumedMonthlySalary: 25000,
+
+  // A rooftop-month is only used for VIN maths if vin_images looks complete for
+  // it. In a settled month vin_images reports MORE images than delivery does
+  // (~1.5-1.9x), so anything below this fraction of the delivered count means
+  // the sync hasn't finished for that rooftop. Dividing delivered images by a
+  // half-loaded vehicle count produces nonsense like 277 images per vehicle.
+  vinCompletenessFloor: 0.5,
 
   // The newest month is always partial — data runs to the last sync, not to the
   // month end. Charging a whole month's salary against a few days of output
@@ -1443,14 +1450,14 @@ function rollTeams(rows, keyFn, labelFn){
    an unfiltered one are computed the same way. The person rows are only used
    for hours and headcount, which have no team-level equivalent. */
 function totals(pms, teams, scoped){
-  let vins = 0, images = 0, imagesAcc = 0, vinImages = 0, cost = 0, costWithVins = 0;
+  let vins = 0, images = 0, delivered = 0, imagesAcc = 0, cost = 0, costWithVins = 0;
   let arrMonth = 0, arrFull = 0, costWithArr = 0, churnedCost = 0;
   for (const t of teams){
-    images += t.images;
+    delivered += t.images;
     imagesAcc += t.images_acc;
     cost += t.allocated_cost;
-    if (t.vin_images || t.vins){
-      vins += t.vins; vinImages += t.vin_images; costWithVins += t.allocated_cost;
+    if (vinUsable(t)){
+      vins += t.vins; images += t.vin_images; costWithVins += t.allocated_cost;
     }
     const share = arrShare(t, F().prod || null);
     if (share){
@@ -1476,17 +1483,17 @@ function totals(pms, teams, scoped){
   const perVehicle = prodSel && CONFIG.perVehicleProducts.includes(prodSel);
 
   const base = {
-    vins, images, imagesAcc, vinImages, cost, costWithVins, churnedCost,
+    vins, images, delivered, imagesAcc, cost, costWithVins, churnedCost,
     arrMonth, arrFull, costWithArr, product: prodSel || null, perVehicle,
     // one artefact per car: cost per image would just restate cost per VIN
-    blended:      perVehicle ? null : (images ? cost/images : 0),
-    imagesPerVin: vins ? imagesAcc/vins : null,
-    costPerVin:   vins ? (prodSel ? cost : costWithVins)/vins : null,
+    blended:      perVehicle ? null : (images ? costWithVins/images : 0),
+    imagesPerVin: vins ? images/vins : null,
+    costPerVin:   vins ? costWithVins/vins : null,
     costRatio:    arrMonth ? costWithArr/arrMonth*100 : null,
     arrCoverage:  teams.length
       ? teams.filter(t => t.arr_month).length / teams.length * 100 : 0,
     vinCoverage:  teams.length
-      ? teams.filter(t => t.vin_images || t.vins).length / teams.length * 100 : 0,
+      ? teams.filter(vinUsable).length / teams.length * 100 : 0,
     // ai_accuracy covers Images only, so under a per-vehicle product it would be
     // reporting a different product's quality against this one's volume
     accuracy: perVehicle ? null : weightedAccuracy(teams),
@@ -1634,15 +1641,17 @@ function renderMonths(T){
   const m = new Map();
   for (const t of scope){
     const d = m.get(t.month_key) ||
-      {key:t.month_key, images:0, cost:0, vins:0, costWithVins:0};
-    d.images += t.images;
+      {key:t.month_key, images:0, delivered:0, cost:0, vins:0, costWithVins:0};
+    d.delivered += t.images;
     d.cost += t.allocated_cost;
-    if (t.vin_images || t.vins){ d.vins += t.vins; d.costWithVins += t.allocated_cost; }
+    if (vinUsable(t)){
+      d.images += t.vin_images; d.vins += t.vins; d.costWithVins += t.allocated_cost;
+    }
     m.set(t.month_key, d);
   }
   const pts = [...m.values()].sort((a,b) => a.key.localeCompare(b.key))
     .map(d => ({...d,
-      cpi: d.images ? d.cost/d.images : 0,
+      cpi: d.images ? d.costWithVins/d.images : 0,
       cpv: d.vins ? d.costWithVins/d.vins : null }));
 
   el("months-label").textContent = pts.length
@@ -1764,7 +1773,7 @@ function renderKpis(T, scoped, teams){
     ["Delivery cost", money(T.cost),
       `${CONFIG.deliveryDomains.map(d=>"@"+d).join(", ")} salary, split by Sum_Target`, true],
     ["Cost per image", T.blended ? money(T.blended) : "—",
-      T.perVehicle ? `${T.product} is one per vehicle` : "delivery cost ÷ images"],
+      T.perVehicle ? `${T.product} is one per vehicle` : "cost ÷ vin_images images"],
 
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
@@ -1802,8 +1811,8 @@ function renderKpis(T, scoped, teams){
     ["Images per VIN",
       T.perVehicle || T.imagesPerVin == null ? "—" : dec(T.imagesPerVin, 1),
       T.perVehicle ? `${sel} is one per vehicle`
-        : T.imagesAcc && T.vins
-          ? `${int(T.imagesAcc)} ÷ ${int(T.vins)}` : `${CONFIG.accuracyProduct} ÷ vehicles`],
+        : T.images && T.vins ? `${int(T.images)} ÷ ${int(T.vins)} · both vin_images`
+          : "vin_images"],
     ["VIN coverage", dec(T.vinCoverage, 0) + "%", "team-months with a vin_images row"],
     ["Enterprises", int(T.accounts), "with QC output"],
     ["Rooftops", int(T.rooftops), "teams served"]
@@ -1855,6 +1864,16 @@ const segOf = (p, t) => p.get(t.team_id) || "No segment";
    is a per-row counter, so summing it across hourly rows and products would
    count the same vehicle many times over. */
 const vinsOf = t => t.vins || 0;
+
+/* Whether a rooftop-month's vehicle count can be trusted. Both sides of every
+   VIN rate come from this test, so a half-synced row is left out of the
+   numerator and the denominator rather than skewing the ratio. */
+const vinUsable = t =>
+  (t.vins || 0) > 0 &&
+  // a blank Team_id isn't a rooftop — every such row collapses into one bucket
+  // and joins to a single vin_images row, which made it read 1,280 images/vehicle
+  !!(t.team_id || "").trim() &&
+  (t.vin_images || 0) >= (t.images || 0) * CONFIG.vinCompletenessFloor;
 
 /* vin_images and delivery_working_data are separate syncs and don't always run
    to the same day. In a complete month vin_images reports ~1.5-1.9x the images
@@ -1923,19 +1942,21 @@ function arrShare(t, product){
 }
 
 
-/* images  — delivery_working_data, the same count the product split adds up to,
-              so every image figure on the page reconciles with every other
-   vinImages — vin_images.image_count, kept for comparison in the coverage note
-   costWithVins — cost of team-months that have a vin_images row, so cost per VIN
-              never divides full cost by a partial vehicle count */
+/* images    — vin_images.image_count, taken from the same row as the vehicle
+                count, so images per VIN is a ratio inside one table and can't be
+                distorted by the two sources being at different sync points
+   delivered — delivery_working_data, kept for the product split and for the
+                coverage comparison between the two tables
+   costWithVins — delivery cost for those same rows; cost only exists in delivery,
+                so the cost rates still cross tables and stay gated by vinUsable */
 const blankAgg = key => ({key, ents:new Set(), roofs:new Set(),
-  images:0, imagesAcc:0, vinImages:0, cost:0, vins:0, costWithVins:0,
+  images:0, delivered:0, imagesAcc:0, cost:0, vins:0, costWithVins:0,
   byProd: {Images:{images:0,cost:0}, Video:{images:0,cost:0}, "360":{images:0,cost:0}},
   arrMonth:0, costWithArr:0, accNum:0, accDen:0});
 
 function addAgg(x, t){
   x.ents.add(t.enterprise); x.roofs.add(t.team_id);
-  x.images += t.images;
+  x.delivered += t.images;          // delivery_working_data, for the product split
   x.imagesAcc += t.images_acc;      // the Images product line on its own
   const pi = productIndex().get(t.team_id + "|" + t.month_key);
   if (pi) for (const p of ARR_PRODUCTS){
@@ -1944,9 +1965,9 @@ function addAgg(x, t){
     x.byProd[p].cost   += pi[p].cost;
   }
   x.cost += t.allocated_cost;
-  if (t.vin_images || t.vins){
-    x.vinImages += t.vin_images;
-    x.vins += t.vins;
+  if (vinUsable(t)){
+    x.images += t.vin_images;         // same row as the vehicle count
+    x.vins   += t.vins;
     x.costWithVins += t.allocated_cost;
   }
   const share = arrShare(t, F().prod || null);
@@ -1962,13 +1983,13 @@ const deriveAgg = x => ({...x,
   ents: x.ents.size, roofs: x.roofs.size,
   /* Each product gets its own rate off its own cost and volume. The blended
      figure hid a 20x gap between a still and a video. */
-  cpi:          x.byProd.Images.images ? x.byProd.Images.cost/x.byProd.Images.images : null,
+  cpi:          x.images ? x.costWithVins/x.images : null,
   costPerSpin:  x.byProd["360"].images ? x.byProd["360"].cost/x.byProd["360"].images : null,
   costPerVideo: x.byProd.Video.images  ? x.byProd.Video.cost/x.byProd.Video.images   : null,
   /* Vehicles are photographed for the Images line; Video and 360 are separate
      deliverables against the same cars. Dividing all three by the vehicle count
      would overstate how many stills each car actually gets. */
-  imagesPerVin: x.vins ? x.imagesAcc/x.vins : null,
+  imagesPerVin: x.vins ? x.images/x.vins : null,   // both from vin_images
   // vehicles are photographed for the Images line, so this divides that cost
   costPerVin: x.vins ? x.byProd.Images.cost/x.vins : null,
   costToServe: x.arrMonth ? x.costWithArr/x.arrMonth*100 : null,
@@ -2106,7 +2127,8 @@ function segmentTable(teams, T){
     <tbody>${rows.map(r => line(r, false)).join("")}
       ${line(deriveAgg(all), true)}</tbody>
   </table>
-  <div class="seghint">Images and cost come from delivery_working_data, vehicles from vin_images ·
+  <div class="seghint">Images and vehicles both come from vin_images, joined on month + team, so
+    images per VIN is a ratio inside one table · cost comes from delivery_working_data ·
     images per VIN counts the ${esc(CONFIG.accuracyProduct)} line only, since Video and 360 are
     separate deliverables against the same cars ·
     accuracy comes from
@@ -2295,7 +2317,7 @@ function renderDrill(){
         acc.ents.add(r.enterprise); acc.roofs.add(r.key);
         acc.images += r.images; acc.priced += r.priced; acc.cost += r.cost;
         acc.vins += r.vins; acc.costWithVins += r.costWithVins;
-        acc.imagesWithVins += r.imagesWithVins;
+        acc.delivered += r.delivered;
         acc.arrMonth += r.arrMonth; acc.costWithArr += r.costWithArr;
         acc.accNum += r.accNum; acc.accDen += r.accDen;
         return acc;
@@ -2877,9 +2899,11 @@ function coverage(){
   if (vTot && dTot && Math.abs(vTot-dTot)/dTot > 0.02){
     chips.push(`image counts differ ${dec(Math.abs(vTot-dTot)/dTot*100,0)}% between tables`);
     items.push(`<div class="cov-item"><b>vin_images reports ${int(vTot)} images,
-      delivery_working_data reports ${int(dTot)}.</b> Every image figure on this page uses
-      delivery_working_data, so the product split adds up and images per VIN divides the same
-      count you see on the cards. vin_images supplies vehicle counts only.</div>`);
+      delivery_working_data reports ${int(dTot)}.</b> Headline image counts, images per VIN and
+      cost per image all use vin_images, so the vehicle and image figures come from the same row
+      and can't drift apart. The Images / Video / 360 split below uses delivery_working_data,
+      because vin_images has no product column — so that split won't sum to the headline
+      figure.</div>`);
   }
 
   const dupVin = S.teams.filter(t => t.vi_rows > 1);
@@ -2888,6 +2912,26 @@ function coverage(){
     items.push(`<div class="cov-item"><b>${dupVin.length} team-months appear more than once in
       vin_images.</b> The duplicates are summed, so vehicle counts for those rooftops may be
       inflated. vin_images is expected to hold one row per month and team.</div>`);
+  }
+
+  const halfSynced = S.teams.filter(t => (t.vins || 0) > 0 && !vinUsable(t));
+  if (halfSynced.length){
+    const imgs = halfSynced.reduce((a,t) => a + t.images, 0);
+    const months = [...new Set(halfSynced.map(t => t.month_key))].sort();
+    const worst = [...halfSynced].sort((a,b) =>
+      (a.vin_images/Math.max(a.images,1)) - (b.vin_images/Math.max(b.images,1))).slice(0,8);
+    chips.push(`${halfSynced.length} rooftop-months with half-loaded VIN data`);
+    items.push(`<div class="cov-item"><b>${halfSynced.length} rooftop-months have a vin_images row
+      that is clearly still filling.</b> vin_images normally reports more images than delivery;
+      where it reports far fewer, the vehicle count is partial and dividing by it gives absurd
+      rates — one rooftop showed 277 images per vehicle against a real figure near 5.
+      These rows are left out of VINs, images per VIN and cost per VIN entirely, rather than
+      distorting them. Their delivery cost and image counts still count in full.
+      ${int(imgs)} images affected, in ${months.map(esc).join(", ")}.
+      <ul><li>${worst.map(t =>
+        `${esc(t.team_name)} ${esc(t.month_key)} — ${int(t.vin_images)} vin_images images vs `
+        + `${int(t.images)} delivered, ${int(t.vins)} vehicles`
+      ).join("</li><li>")}${halfSynced.length>8?`</li><li>+${halfSynced.length-8} more`:""}</li></ul></div>`);
   }
 
   const noVin = S.teams.filter(t => !t.vins);
