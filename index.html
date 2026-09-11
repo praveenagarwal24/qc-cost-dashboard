@@ -529,7 +529,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v39 · 27 Aug 2026";
+const VERSION = "v41 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -560,9 +560,17 @@ const CONFIG = {
   duplicatePay: "sum",
 
   // Payroll for a month is only final around the 5th of the next month, so the
-  // newest month has no salary rows. When true, each person's most recent known
-  // salary is carried forward as an estimate and flagged as such on the page.
+  // newest month has no salary rows at all. When true, a month with NO payroll
+  // loaded gets each person's most recent known salary carried forward. A person
+  // missing from a month that does have payroll is left unpriced instead — that
+  // is a gap in salary_sheet, not a timing lag, and hiding it would be wrong.
   carryForwardSalary: true,
+
+  // Someone appearing for the first time in an unloaded month has nothing to
+  // carry forward — a new joiner before their first payroll run. This stands in
+  // until their real figure lands, at which point the actual takes over on its
+  // own. Set to 0 to leave them unpriced instead.
+  assumedMonthlySalary: 25000,
 
   // The newest month is always partial — data runs to the last sync, not to the
   // month end. Charging a whole month's salary against a few days of output
@@ -607,6 +615,18 @@ const INCLUDED = like(CONFIG.deliveryDomains);
    a type error rather than parsing. */
 const ACC_MONTH = `FORMAT_DATE('%Y-%m', Month)`;
 
+/* The salary a person-month is costed on, in priority order:
+     1. the actual figure from salary_sheet
+     2. if that month has no payroll loaded at all, their last known salary
+     3. if they have no history either, the assumed figure — a new joiner
+   A person missing from a month that DOES have payroll stays unpriced. */
+const SALARY_EXPR = !CONFIG.carryForwardSalary
+  ? "f.actual_salary"
+  : `COALESCE(f.actual_salary, IF(mh.month_key IS NULL, COALESCE(f.carried_salary`
+    + `${CONFIG.assumedMonthlySalary ? `, ${CONFIG.assumedMonthlySalary}` : ""}), NULL))`;
+const PRORATE_EXPR = CONFIG.proratePartialMonths
+  ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0";
+
 const SHARED = `
 WITH work AS (
   SELECT
@@ -647,6 +667,13 @@ sal_email AS (
          MAX(salary)     AS salary_max,
          ${CONFIG.duplicatePay === "max" ? "MAX(salary)" : "SUM(salary)"} AS salary
   FROM salary_raw GROUP BY month_key, email
+),
+/* Months where payroll has been loaded at all. A month absent here simply
+   hasn't been uploaded yet, which is a timing gap worth estimating. A person
+   missing from a month that IS loaded is a gap in the sheet, and gets left as
+   one rather than hidden behind a carried figure. */
+month_has_salary AS (
+  SELECT DISTINCT month_key FROM sal_email
 ),
 pm_volume AS (
   SELECT qc_email, qc_local, month_key,
@@ -694,35 +721,31 @@ pm AS (
   SELECT
     f.qc_email, f.month_key, f.month_images, f.month_target, f.month_hours,
     ms.days_covered, ms.days_in_month,
-    ${CONFIG.proratePartialMonths
-        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"} AS prorate,
-    ROUND(${CONFIG.carryForwardSalary
-        ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
-      * ${CONFIG.proratePartialMonths
-        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"}, 2)
-                                                              AS month_salary,
+    ${PRORATE_EXPR}                                           AS prorate,
+    ROUND(${SALARY_EXPR} * ${PRORATE_EXPR}, 2)                 AS month_salary,
     f.actual_salary                                           AS actual_salary,
     CASE WHEN f.actual_salary IS NOT NULL THEN 'actual'
-         WHEN ${CONFIG.carryForwardSalary ? "f.carried_salary IS NOT NULL" : "FALSE"} THEN 'carried'
+         WHEN ${CONFIG.carryForwardSalary
+           ? "mh.month_key IS NULL AND f.carried_salary IS NOT NULL" : "FALSE"} THEN 'carried'
+         WHEN ${CONFIG.carryForwardSalary && CONFIG.assumedMonthlySalary
+           ? "mh.month_key IS NULL" : "FALSE"} THEN 'assumed'
          ELSE 'none' END                                      AS salary_basis,
-    IF(f.actual_salary IS NULL, f.salary_month, NULL)         AS salary_from_month,
+    IF(f.actual_salary IS NULL AND mh.month_key IS NULL, f.salary_month, NULL)
+                                                              AS salary_from_month,
     f.pay_rows                                                AS pay_rows,
     f.salary_sum - f.salary_max                               AS pay_inflation,
     COALESCE(f.name, f.carried_name,
              INITCAP(REPLACE(f.qc_local, '.', ' ')))          AS name,
     COALESCE(f.emp_no, f.carried_emp_no)                      AS emp_no,
-    IF(f.actual_salary IS NULL AND f.carried_salary IS NULL, 'none', 'email') AS match_type,
+    IF(f.actual_salary IS NULL AND mh.month_key IS NOT NULL, 'none', 'email') AS match_type,
     -- A month's salary spread over that month's Sum_Target, so the rate is
     -- cost per unit of target rather than cost per image. Work with a higher
     -- target per image — a 360 spin against a still — now costs more.
-    SAFE_DIVIDE(
-      ${CONFIG.carryForwardSalary
-        ? "COALESCE(f.actual_salary, f.carried_salary)" : "f.actual_salary"}
-        * ${CONFIG.proratePartialMonths
-        ? "LEAST(1.0, SAFE_DIVIDE(ms.days_covered, ms.days_in_month))" : "1.0"},
+    SAFE_DIVIDE(${SALARY_EXPR} * ${PRORATE_EXPR},
       NULLIF(f.month_target, 0))                              AS rate
   FROM pm_filled f
   JOIN month_span ms USING (month_key)
+  LEFT JOIN month_has_salary mh USING (month_key)
 )`;
 
 const SQL_A = SHARED + `,
@@ -1514,11 +1537,12 @@ function renderEstimateNote(){
   const rows = dailyView();
   if (!rows.length) return "";
   const carried = rows.filter(r => r.salary_basis === "carried");
+  const assumedRows = rows.filter(r => r.salary_basis === "assumed");
   const partial = new Map();
   for (const r of rows)
     if (r.prorate != null && r.prorate < 0.999)
       partial.set(r.month_key, r);
-  if (!carried.length && !partial.size) return "";
+  if (!carried.length && !partial.size && !assumedRows.length) return "";
 
   const bits = [];
   if (carried.length){
@@ -1528,6 +1552,11 @@ function renderEstimateNote(){
     bits.push(`Salary is estimated for ${months.map(esc).join(", ")} — carried from the previous
       month, since payroll lands around the 5th. ${dec(share,0)}% of the images in view are
       costed this way.`);
+  }
+  if (assumedRows.length){
+    const n = new Set(assumedRows.map(r => r.email)).size;
+    bits.push(`${n} ${n>1?"people have":"person has"} no salary history and ${n>1?"are":"is"}
+      costed at an assumed ${money(CONFIG.assumedMonthlySalary)} a month.`);
   }
   if (partial.size){
     bits.push([...partial.entries()].sort().map(([m,r]) =>
@@ -2676,9 +2705,10 @@ function coverage(){
 
   /* Which months are running on carried salary, and which have nothing at all. */
   const pmAll = byPersonMonth(S.daily);
-  const carried = new Map(), none = new Map();
+  const carried = new Map(), none = new Map(), assumed = new Map();
   for (const p of pmAll){
     const bag = p.salary_basis === "carried" ? carried
+              : p.salary_basis === "assumed" ? assumed
               : p.salary_basis === "none" ? none : null;
     if (!bag) continue;
     const e = bag.get(p.month_key) || {cost:0, images:0, people:0, from:new Set()};
@@ -2693,6 +2723,8 @@ function coverage(){
     items.push(`<div class="cov-item"><b>Salary is estimated for
       ${[...carried.keys()].sort().map(esc).join(", ")}.</b> Payroll for a month lands around the
       5th of the next one, so each person carries their most recent known salary forward.
+      Only months with no payroll loaded at all are estimated this way; a person missing from a
+      month that does have payroll is left unpriced instead.
       ${money(total)} of delivery cost (${dec(share,1)}% of the total) rests on that estimate —
       accurate if headcount and pay held steady, wrong by whatever changed.
       <ul><li>${[...carried.entries()].sort().map(([m,e]) =>
@@ -2717,6 +2749,19 @@ function coverage(){
       This clears itself once the vin_images sync catches up.</div>`);
   }
 
+  if (assumed.size){
+    const who = [...new Set(pmAll.filter(p => p.salary_basis === "assumed").map(p => p.email))];
+    const cost = [...assumed.values()].reduce((a,e) => a + e.cost, 0);
+    chips.push(`${who.length} on assumed salary`);
+    items.push(`<div class="cov-item"><b>${who.length} ${who.length>1?"people have":"person has"}
+      no salary history at all, so ${who.length>1?"they are":"it is"} costed at the assumed
+      ${money(CONFIG.assumedMonthlySalary)} a month.</b> New joiners whose first payroll run
+      hasn't happened — there is nothing to carry forward. ${money(cost)} of delivery cost rests
+      on this, and it becomes actual the moment their real figure lands.
+      <ul><li>${who.slice(0,10).map(esc).join("</li><li>")}</li></ul>
+      Set assumedMonthlySalary to 0 in CONFIG to leave them unpriced instead.</div>`);
+  }
+
   const pro = new Map();
   for (const r of S.daily)
     if (r.prorate != null && r.prorate < 0.999) pro.set(r.month_key, r);
@@ -2734,10 +2779,15 @@ function coverage(){
 
   if (none.size){
     const lost = [...none.values()].reduce((a,e) => a + e.images, 0);
-    chips.push(`${none.size} month${none.size>1?"s":""} with no salary at all`);
-    items.push(`<div class="cov-item"><b>No salary — actual or carried — for
-      ${[...none.keys()].sort().map(esc).join(", ")}.</b> ${int(lost)} images carry zero cost.
-      These are people with no earlier month to carry from.</div>`);
+    chips.push(`${none.size} month${none.size>1?"s":""} with missing salary rows`);
+    const who = [...new Set(byPersonMonth(S.daily)
+      .filter(p => p.salary_basis === "none").map(p => p.email))];
+    items.push(`<div class="cov-item"><b>${who.length} people worked in months where payroll
+      <i>is</i> loaded but have no salary row of their own.</b> ${int(lost)} images carry zero
+      cost. These are gaps in salary_sheet rather than a timing lag, so nothing is carried
+      forward — the cost is understated until the rows are added.
+      <ul><li>${who.slice(0,12).map(esc).join("</li><li>")}${who.length>12?`</li><li>+${who.length-12} more`:""}</li></ul>
+      Months affected: ${[...none.keys()].sort().map(esc).join(", ")}.</div>`);
   }
 
   /* Where ai_accuracy's own image count and delivery's Images-product count
