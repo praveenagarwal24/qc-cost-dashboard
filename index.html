@@ -281,6 +281,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
   border-top:1px solid var(--rule);border-bottom:none;font-weight:500}
 .drilltab tfoot td:first-child{font-family:Inter,sans-serif;color:var(--steel)}
 .drill-empty{padding:40px var(--pad);text-align:center;color:var(--steel)}
+.drilltab th.sel,.drilltab td.sel{width:34px;text-align:center;padding-left:var(--pad);
+  padding-right:4px;cursor:default}
+.drilltab input[type=checkbox]{width:15px;height:15px;accent-color:var(--accent);cursor:pointer;
+  margin:0;vertical-align:middle}
+.drilltab tr.picked td{background:var(--accent-soft)}
+.excl-chip{font-family:"IBM Plex Mono",monospace;font-size:11px;color:var(--steel);
+  border:1px solid var(--rule);border-radius:999px;padding:4px 11px;cursor:pointer;
+  background:var(--card)}
+.excl-chip:hover{border-color:var(--accent);color:var(--ink)}
 
 /* ---------- loading ---------- */
 #loader{position:fixed;inset:0;z-index:90;background:#0e0a14;color:#e7ecf2;
@@ -351,6 +360,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
         <div class="status" id="drill-sub"></div>
       </div>
       <div class="modal-actions">
+        <span class="status" id="drill-selinfo"></span>
+        <button class="tiny" id="drill-apply" style="display:none"></button>
         <input type="text" id="drill-find" placeholder="Find rooftop…" autocomplete="off">
         <button class="ghost tiny" id="drill-csv">Export CSV</button>
         <button class="ghost tiny" id="drill-close">Close</button>
@@ -409,6 +420,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       </div>
     </div>
     <div class="actions">
+      <span class="excl-chip" id="excl-chip" style="display:none"></span>
       <span class="whoami"><span class="em" id="who"></span>
         <button id="btn-out">Sign out</button></span>
       <button class="ghost tiny" id="btn-theme" title="Switch theme">Dark</button>
@@ -458,6 +470,8 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
       <textarea id="sql-d" spellcheck="false"></textarea>
       <div class="eyebrow">E · product × day — drives the trend chart</div>
       <textarea id="sql-e" spellcheck="false" style="min-height:150px"></textarea>
+      <div class="eyebrow">F · shared exclusion list</div>
+      <textarea id="sql-f" spellcheck="false" style="min-height:150px"></textarea>
     </div>
   </details>
 
@@ -532,7 +546,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v49 · 27 Aug 2026";
+const VERSION = "v51 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -581,6 +595,11 @@ const CONFIG = {
   // the sync hasn't finished for that rooftop. Dividing delivered images by a
   // half-loaded vehicle count produces nonsense like 277 images per vehicle.
   vinCompletenessFloor: 0.5,
+
+  // Shared exclusion list. Everyone reads it, so the dashboard shows the same
+  // figures for every reviewer. Writing needs BigQuery edit rights on this one
+  // table — people without them still see the list, just can't change it.
+  exclusionTable: "excluded_rooftops",
 
   // The newest month is always partial — data runs to the last sync, not to the
   // month end. Charging a whole month's salary against a few days of output
@@ -924,6 +943,22 @@ FROM work w
 JOIN pm ON pm.qc_email = w.qc_email AND pm.month_key = w.month_key
 GROUP BY work_date, product`;
 
+/* The shared exclusion list. Anything here is left out of every figure for
+   every reviewer. Read on each load so one person's decision reaches everyone. */
+const SQL_F = `
+SELECT
+  LOWER(TRIM(team_id))              AS team_id,
+  ANY_VALUE(rooftop)                AS rooftop,
+  ANY_VALUE(enterprise)             AS enterprise,
+  ANY_VALUE(enterprise_id)          AS enterprise_id,
+  ANY_VALUE(poc)                    AS poc,
+  ANY_VALUE(note)                   AS note,
+  CAST(MAX(excluded_at) AS STRING)  AS excluded_at,
+  ANY_VALUE(excluded_by)            AS excluded_by
+FROM \`${CONFIG.project}.${CONFIG.dataset}.${CONFIG.exclusionTable}\`
+WHERE team_id IS NOT NULL AND TRIM(team_id) != ''
+GROUP BY team_id`;
+
 const SQL_C = `
 SELECT
   FORMAT_DATE('%Y-%m', DATE(Hourly_Date))     AS month_key,
@@ -941,6 +976,7 @@ ORDER BY images DESC`;
    ========================================================================== */
 const S = {
   daily:[], teams:[], products:[], trend:[], excluded:[], short:[],
+  excluded_teams:new Map(), drillSel:new Set(),
   view:"accounts", sortKey:"cpi", sortDir:-1, drill:null,
   monthChart:"bar", trendGrain:"day", trendProducts:null, cohortMode:"vins"
 };
@@ -996,7 +1032,10 @@ function initTokenClient(){
   if (tokenClient) return;
   tokenClient = google.accounts.oauth2.initTokenClient({
     client_id: CONFIG.clientId,
-    scope: "https://www.googleapis.com/auth/bigquery.readonly email",
+    // full bigquery rather than readonly: the exclusion list is written back.
+    // What a person can actually change is still governed by their IAM roles —
+    // most reviewers hold Data Viewer and simply can't write.
+    scope: "https://www.googleapis.com/auth/bigquery email",
     callback: r => { const p = pending; pending = null;
       if (!p) return;
       r?.access_token ? p.resolve(r) : p.reject(new Error("Sign-in was cancelled.")); },
@@ -1146,6 +1185,7 @@ async function runQuery(){
       bq(el("sql-c").value), bq(el("sql-d").value), bq(el("sql-e").value)]);
     S.daily = a.map(normDaily); S.teams = b.map(normTeam);
     S.excluded = c.map(normExcl); S.products = d.map(normProd);
+    await reloadExclusions();
     invalidateProductCache();
     S.trend = e.map(o => ({ work_date:String(o.work_date||"").slice(0,10),
       product:o.product||"Unspecified",
@@ -1379,6 +1419,59 @@ function dailyView(){
   return S.daily.filter(r => (!f.month || r.month_key === f.month) &&
     (!f.q || r.name.toLowerCase().includes(f.q) || r.email.includes(f.q)));
 }
+/* ==========================================================================
+   Excluded rooftops
+   A reviewed list of rooftops left out of every figure — test accounts, wrongly
+   attributed work, anything that shouldn't count. Kept in the browser because
+   the dashboard's BigQuery scope is read-only; export/import moves it between
+   people until it lives somewhere central.
+   ========================================================================== */
+const isExcluded = id => S.excluded_teams.has(id);
+const sqlStr = v => "'" + String(v ?? "").replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+
+/* DML against the shared table. Writing is what makes an exclusion apply to
+   everyone, so it has to happen server-side — a browser-local list would show
+   different numbers to different people, which is worse than no feature. */
+async function excludeTeams(rows){
+  if (!rows.length) return;
+  const values = rows.map(r => `(${[
+    sqlStr(r.team_id), sqlStr(r.rooftop || r.team_name || ""),
+    sqlStr(r.enterprise || ""), sqlStr(r.enterprise_id || ""),
+    sqlStr(r.poc || ""), sqlStr(""), "CURRENT_DATE()", sqlStr(AUTH.email || "")
+  ].join(", ")})`).join(",\n    ");
+  await bq(`MERGE \`${CONFIG.project}.${CONFIG.dataset}.${CONFIG.exclusionTable}\` T
+USING (
+  SELECT * FROM UNNEST([
+    STRUCT<team_id STRING, rooftop STRING, enterprise STRING, enterprise_id STRING,
+           poc STRING, note STRING, excluded_at DATE, excluded_by STRING>
+    ${values}
+  ])
+) S
+ON LOWER(TRIM(T.team_id)) = LOWER(TRIM(S.team_id))
+WHEN NOT MATCHED THEN INSERT ROW`);
+}
+
+async function restoreTeams(ids){
+  if (!ids.length) return;
+  await bq(`DELETE FROM \`${CONFIG.project}.${CONFIG.dataset}.${CONFIG.exclusionTable}\`
+WHERE LOWER(TRIM(team_id)) IN (${ids.map(sqlStr).join(", ")})`);
+}
+
+async function reloadExclusions(){
+  try {
+    const rows = await bq(el("sql-f").value);
+    S.excluded_teams = new Map(rows.map(r => [String(r.team_id).toLowerCase(), {
+      team_id:r.team_id, rooftop:r.rooftop || "", enterprise:r.enterprise || "",
+      enterprise_id:r.enterprise_id || "", poc:r.poc || "",
+      at:r.excluded_at || "", by:r.excluded_by || "" }]));
+    S.exclusionTableMissing = false;
+  } catch(e){
+    S.excluded_teams = new Map();
+    S.exclusionTableMissing = /not found|does not exist/i.test(e.message || "");
+    if (!S.exclusionTableMissing) console.warn("exclusion list:", e.message);
+  }
+}
+
 /* Which products a rooftop actually delivered, from delivery_working_data —
    arr.Products is what the account is contracted for, which is a different
    question and was what the old filter matched on. */
@@ -1401,6 +1494,7 @@ function invalidateProductCache(){ _dpKey = ""; }
 function teamView(){
   const f = F();
   return S.teams.filter(r =>
+    !isExcluded(r.team_id) &&
     (!f.month || r.month_key === f.month) &&
     (!f.seg   || r.segment === f.seg) &&
     (!f.dt    || r.dealer_type === f.dt) &&
@@ -1551,6 +1645,13 @@ function render(){
   renderKpis(T, scoped, teams);
   renderTrend(rows, teams, T, accActiveNonProduct());
   renderCohort();
+  const chip = el("excl-chip");
+  if (S.excluded_teams.size){
+    chip.style.display = "";
+    chip.textContent = `${S.excluded_teams.size} excluded`;
+    chip.onclick = () => openDrill("excluded", "");
+  } else chip.style.display = "none";
+
   document.querySelectorAll(".kpi.drillable").forEach(c =>
     c.addEventListener("click", () => openDrill(c.dataset.drill, "")));
   document.querySelectorAll(".segrow").forEach(tr =>
@@ -2193,7 +2294,7 @@ const DRILL = {
     find: "Find rooftop\u2026",
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
                  || (r.enterprise||"").toLowerCase().includes(q),
-    build: segmentDrill
+    build: segmentDrill, selectable: true
   },
   product: {
     eyebrow: "Product delivered",
@@ -2209,7 +2310,23 @@ const DRILL = {
     find: "Find rooftop\u2026",
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
                  || (r.enterprise||"").toLowerCase().includes(q),
-    build: productDrill
+    build: productDrill, selectable: true
+  },
+  excluded: {
+    eyebrow: "Excluded from every figure",
+    cols: [
+      ["enterprise",    "Enterprise",    "text"],
+      ["enterprise_id", "Enterprise ID", "id"],
+      ["rooftop",       "Rooftop",       "text"],
+      ["team_id",       "Team ID",       "id"],
+      ["poc",           "POC",           "text"],
+      ["images",        "Images",        "int"],
+      ["cost",          "Delivery cost", "money"]
+    ],
+    find: "Find rooftop\u2026",
+    match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
+                 || (r.enterprise||"").toLowerCase().includes(q),
+    build: excludedDrill, selectable: true, restoring: true
   },
   churn: {
     eyebrow: "Churned rooftops",
@@ -2228,7 +2345,7 @@ const DRILL = {
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
                  || (r.enterprise||"").toLowerCase().includes(q)
                  || (r.poc||"").toLowerCase().includes(q),
-    build: churnDrill
+    build: churnDrill, selectable: true
   },
   noarr: {
     eyebrow: "Rooftops with no ARR row",
@@ -2247,7 +2364,7 @@ const DRILL = {
     match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
                  || (r.enterprise||"").toLowerCase().includes(q)
                  || (r.poc||"").toLowerCase().includes(q),
-    build: noArrDrill
+    build: noArrDrill, selectable: true
   },
   day: {
     eyebrow: "Day",
@@ -2289,6 +2406,25 @@ function churnDrill(){
 }
 function noArrDrill(){
   return rooftopRows(t => !t.arr_month, "All rooftops without ARR");
+}
+
+function excludedDrill(){
+  const meta = [...S.excluded_teams.values()];
+  const byId = new Map();
+  for (const t of S.teams){            // unfiltered on purpose
+    if (!isExcluded(t.team_id)) continue;
+    let x = byId.get(t.team_id);
+    if (!x) byId.set(t.team_id, x = Object.assign(blankAgg(t.team_id), {
+      enterprise:t.enterprise, enterprise_id:t.enterprise_id,
+      rooftop:t.team_name, team_id:t.team_id, poc:t.poc || "" }));
+    addAgg(x, t);
+  }
+  // keep entries whose rooftop no longer appears in the data at all
+  for (const m of meta) if (!byId.has(m.team_id))
+    byId.set(m.team_id, Object.assign(blankAgg(m.team_id), m, {images:0, cost:0}));
+  const all = blankAgg("All excluded");
+  for (const t of S.teams) if (isExcluded(t.team_id)) addAgg(all, t);
+  return { rows:[...byId.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
 }
 
 function segmentDrill(key){
@@ -2363,6 +2499,7 @@ function fmtDrill(r, key, kind){
 
 function openDrill(type, key){
   S.drill = { type, key, sortKey:"images", sortDir:-1 };
+  S.drillSel.clear();
   el("drill-eyebrow").textContent = key ? DRILL[type].eyebrow : "Breakdown";
   el("drill-find").placeholder = DRILL[type].find;
   el("drill-find").value = "";
@@ -2392,14 +2529,19 @@ function renderDrill(){
     + (type === "segment"
         ? ` \u00b7 ${int(new Set(rows.map(r => r.enterprise)).size)} enterprises` : "");
 
-  el("drill-tab").querySelector("thead").innerHTML = "<tr>" + spec.cols.map(([k,l]) =>
-    `<th data-k="${k}" class="${k===sortKey ? "sorted"+(sortDir===1?" asc":"") : ""}">${l}</th>`
-  ).join("") + "</tr>";
+  const sel = !!spec.selectable;
+  el("drill-tab").querySelector("thead").innerHTML = "<tr>"
+    + (sel ? `<th class="sel"><input type="checkbox" id="drill-all" title="Select all shown"></th>` : "")
+    + spec.cols.map(([k,l]) =>
+      `<th data-k="${k}" class="${k===sortKey ? "sorted"+(sortDir===1?" asc":"") : ""}">${l}</th>`
+    ).join("") + "</tr>";
 
   el("drill-tab").querySelector("tbody").innerHTML = shown.length
-    ? shown.map(r => "<tr>" + spec.cols.map(([k,,kind]) =>
-        `<td>${fmtDrill(r, k, kind)}</td>`).join("") + "</tr>").join("")
-    : `<tr><td colspan="${spec.cols.length}" class="drill-empty">Nothing matches that search.</td></tr>`;
+    ? shown.map(r => `<tr${sel && S.drillSel.has(r.team_id) ? ' class="picked"' : ""}>`
+        + (sel ? `<td class="sel"><input type="checkbox" data-id="${esc(r.team_id)}"`
+                 + `${S.drillSel.has(r.team_id) ? " checked" : ""}></td>` : "")
+        + spec.cols.map(([k,,kind]) => `<td>${fmtDrill(r, k, kind)}</td>`).join("") + "</tr>").join("")
+    : `<tr><td colspan="${spec.cols.length + (sel?1:0)}" class="drill-empty">Nothing matches that search.</td></tr>`;
 
   /* The footer totals what's on screen, so a filtered view never shows a total
      that contradicts the rows above it. */
@@ -2429,16 +2571,77 @@ function renderDrill(){
     ? esc(foot.name) : esc(foot.key || "All rooftops");
   const footCount = `${int(shown.length)} ${unit}`;
   el("drill-tab").querySelector("tfoot").innerHTML = "<tr>"
+    + (sel ? `<td class="sel"></td>` : "")
     + `<td colspan="${idCols}">${footLabel} · ${footCount}</td>`
     + spec.cols.slice(idCols).map(([k,,kind]) =>
         `<td>${fmtDrill(foot, k, kind)}</td>`).join("") + "</tr>";
 
-  el("drill-tab").querySelectorAll("th").forEach(th => th.addEventListener("click", () => {
-    const k = th.dataset.k;
-    S.drill.sortDir = S.drill.sortKey === k ? -S.drill.sortDir : -1;
-    S.drill.sortKey = k;
-    renderDrill();
-  }));
+  el("drill-tab").querySelectorAll("th[data-k]").forEach(th =>
+    th.addEventListener("click", () => {
+      const k = th.dataset.k;
+      S.drill.sortDir = S.drill.sortKey === k ? -S.drill.sortDir : -1;
+      S.drill.sortKey = k;
+      renderDrill();
+    }));
+
+  if (sel){
+    el("drill-tab").querySelectorAll('tbody input[type=checkbox]').forEach(cb =>
+      cb.addEventListener("change", () => {
+        cb.checked ? S.drillSel.add(cb.dataset.id) : S.drillSel.delete(cb.dataset.id);
+        cb.closest("tr").classList.toggle("picked", cb.checked);
+        renderSelInfo(spec, shown);
+      }));
+    const all = el("drill-all");
+    if (all){
+      all.checked = shown.length > 0 && shown.every(r => S.drillSel.has(r.team_id));
+      all.addEventListener("change", () => {
+        shown.forEach(r => all.checked ? S.drillSel.add(r.team_id) : S.drillSel.delete(r.team_id));
+        renderDrill();
+      });
+    }
+  }
+  renderSelInfo(spec, shown);
+}
+
+/* The action bar reads "exclude" or "restore" depending on which list is open,
+   so one modal serves both directions. */
+function renderSelInfo(spec, shown){
+  const btn = el("drill-apply"), info = el("drill-selinfo");
+  if (!spec.selectable || !S.drillSel.size){
+    btn.style.display = "none"; info.textContent = "";
+    return;
+  }
+  const n = S.drillSel.size;
+  info.textContent = `${n} selected`;
+  btn.style.display = "";
+  btn.textContent = spec.restoring ? `Restore ${n}` : `Exclude ${n}`;
+  btn.onclick = async () => {
+    const rows = shown.filter(r => S.drillSel.has(r.team_id));
+    const restoring = spec.restoring;
+    if (!confirm(restoring
+      ? `Put ${n} rooftop${n>1?"s":""} back into every figure, for everyone?`
+      : `Remove ${n} rooftop${n>1?"s":""} from every figure, for everyone?\n\n`
+        + `Their cost, images and vehicles stop counting for every reviewer, not just you. `
+        + `The list can be reviewed or undone from the "excluded" chip in the header.`)) return;
+    btn.disabled = true;
+    btn.textContent = restoring ? "Restoring…" : "Excluding…";
+    try{
+      restoring ? await restoreTeams([...S.drillSel]) : await excludeTeams(rows);
+      await reloadExclusions();
+      S.drillSel.clear();
+      closeDrill();
+      render();
+    }catch(e){
+      /* Almost always a permissions error: they can read the dashboard but not
+         curate the list. Say which, rather than leaving a dead button. */
+      alert(/permission|denied|access/i.test(e.message || "")
+        ? `You don't have edit rights on ${CONFIG.exclusionTable}, so the shared list can't be `
+          + `changed from your account. Ask an owner to grant BigQuery Data Editor on that table.`
+        : `Couldn't update the shared list.\n\n${e.message}`);
+      btn.disabled = false;
+      renderSelInfo(spec, shown);
+    }
+  };
 }
 
 /* Product colours come from the Spyne palette. Colour here means product, not
@@ -2631,6 +2834,7 @@ function renderTrend(rows, teams, T, scoped){
   el("trend-n").textContent = pts.length
     ? `${pts.length} ${grain}s · ${int(pts.reduce((a,d)=>a+d.images,0))} images`
       + (grain === "month" && f.month ? " · all months" : "")
+      + (S.excluded_teams.size ? " · excludes not applied here" : "")
     : "";
   if (!pts.length){
     svg.innerHTML = "";
@@ -3028,6 +3232,30 @@ function coverage(){
       ).join("</li><li>")}</li></ul></div>`);
   }
 
+  if (S.exclusionTableMissing){
+    chips.push(`exclusion list not set up`);
+    items.push(`<div class="cov-item"><b>The shared exclusion table doesn't exist yet.</b>
+      Nothing is being excluded. Create
+      <span class="num">${esc(CONFIG.project)}.${esc(CONFIG.dataset)}.${esc(CONFIG.exclusionTable)}</span>
+      with columns team_id, rooftop, enterprise, enterprise_id, poc, note, excluded_at DATE,
+      excluded_by — then the checkboxes in any rooftop view will write to it.</div>`);
+  }
+  if (S.excluded_teams.size){
+    const ids = new Set(S.excluded_teams.keys());
+    const rows = S.teams.filter(t => ids.has(t.team_id));
+    const imgs = rows.reduce((a,t) => a + t.images, 0);
+    const cost = rows.reduce((a,t) => a + t.allocated_cost, 0);
+    chips.push(`${S.excluded_teams.size} rooftops excluded`);
+    items.push(`<div class="cov-item"><b>${S.excluded_teams.size} rooftops are excluded from every
+      figure by choice.</b> ${int(imgs)} images and ${money(cost)} of delivery cost are left out.
+      The list is shared: it lives in ${esc(CONFIG.exclusionTable)} and applies to every reviewer.
+      The daily trend chart can't apply exclusions, since its query has no rooftop dimension.
+      <ul><li>${[...S.excluded_teams.values()].slice(0,10).map(e =>
+        `${esc(e.enterprise || "—")} · ${esc(e.rooftop || e.team_id)}`
+        + (e.at ? ` (since ${esc(e.at)})` : "")).join("</li><li>")}
+        ${S.excluded_teams.size>10?`</li><li>+${S.excluded_teams.size-10} more`:""}</li></ul></div>`);
+  }
+
   const halfSynced = S.teams.filter(t => (t.vins || 0) > 0 && !vinUsable(t));
   if (halfSynced.length){
     const imgs = halfSynced.reduce((a,t) => a + t.images, 0);
@@ -3116,6 +3344,7 @@ function afterLoad(source){
 
 el("ver").textContent = VERSION;
 
+
 /* ARR is stored without a currency, so the rate that makes it comparable to INR
    salary belongs in the UI — every margin figure moves with it. */
 /* ARR has to be prorated on exactly the same basis as cost. Charging 9 days of
@@ -3182,6 +3411,7 @@ el("btn-theme").addEventListener("click", () => {
 el("sql-a").value = SQL_A; el("sql-b").value = SQL_B; el("sql-c").value = SQL_C;
 el("sql-d").value = SQL_D;
 el("sql-e").value = SQL_E;
+el("sql-f").value = SQL_F;
 el("btn-run").addEventListener("click", runQuery);
 ["f-month","f-seg","f-dt","f-poc","f-stage","f-prod","f-ver"]
   .forEach(id => el(id).addEventListener("change", render));
