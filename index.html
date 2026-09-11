@@ -529,7 +529,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v43 · 27 Aug 2026";
+const VERSION = "v46 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -810,15 +810,32 @@ arr AS (
   GROUP BY team_id
 ),
 vin AS (
-  -- vin_images carries the vehicle count and its image count on the same row,
-  -- one row per month x team, so no category collapse is needed and the two
-  -- numbers are internally consistent. vi_rows exposes any duplicate keys.
+  /* vin_images.month is a DATE that should be the first of the month. The loader
+     has written it two different ways: 2001-04-26 (year defaulted, real year in
+     the day) and 2026-01-04 (month and day swapped, from a 01-04-2026 source).
+     Rather than track whichever is current, the month is normalised:
+       day = 1                       -> a proper month-start date, use it
+       month = 1 and day in 2..12    -> month and day are swapped, use the day
+       year < 2015 and day in 20..31 -> year defaulted, day holds the real year
+     A correctly loaded date falls through the first branch untouched, so this
+     keeps working if the load is fixed. This table is monthly, so a day other
+     than 1 never carries real meaning and can't be misread. */
   SELECT
-    FORMAT_DATE('%Y-%m', month)   AS month_key,
-    LOWER(TRIM(team_id))          AS team_id,
-    SUM(sku_count)                AS vins,
-    SUM(image_count)              AS vin_images,
-    COUNT(*)                      AS vi_rows
+    CASE
+      WHEN EXTRACT(DAY FROM month) = 1
+        THEN FORMAT_DATE('%Y-%m', month)
+      WHEN EXTRACT(MONTH FROM month) = 1 AND EXTRACT(DAY FROM month) BETWEEN 2 AND 12
+        THEN FORMAT('%04d-%02d', EXTRACT(YEAR FROM month), EXTRACT(DAY FROM month))
+      WHEN EXTRACT(YEAR FROM month) < 2015 AND EXTRACT(DAY FROM month) BETWEEN 20 AND 31
+        THEN FORMAT('%04d-%02d', 2000 + EXTRACT(DAY FROM month), EXTRACT(MONTH FROM month))
+      ELSE FORMAT_DATE('%Y-%m', month)
+    END                               AS month_key,
+    LOWER(TRIM(team_id))              AS team_id,
+    SUM(sku_count)                    AS vins,
+    SUM(image_count)                  AS vin_images,
+    COUNT(*)                          AS vin_days,
+    CAST(MAX(month) AS STRING)        AS vin_last_date,
+    MAX(IF(EXTRACT(DAY FROM month) = 1, 0, 1)) AS vin_month_repaired
   FROM \`${CONFIG.project}.${CONFIG.dataset}.vin_images\`
   WHERE team_id IS NOT NULL AND TRIM(team_id) != '' AND month IS NOT NULL
   GROUP BY month_key, team_id
@@ -857,7 +874,7 @@ SELECT
   t.allocated_cost, t.hours_attributed,
   a.segment, a.poc, a.acc_rows, a.acc_images,
   ROUND(a.true_accuracy, 2) AS true_accuracy,
-  v.vins, v.vin_images, v.vi_rows,
+  v.vins, v.vin_images, v.vin_days, v.vin_last_date, v.vin_month_repaired,
   r.stage, r.contracted_arr, r.live_arr, r.products, r.version, r.arr_rows
 FROM team t
 LEFT JOIN acc a
@@ -1166,7 +1183,9 @@ const normTeam = o => ({
   unpriced_images:num(o.unpriced_images)||0,
   allocated_cost:num(o.allocated_cost)||0,
   hours_attributed:num(o.hours_attributed)||0,
-  vins:num(o.vins), vin_images:num(o.vin_images)||0, vi_rows:num(o.vi_rows)||0,
+  vins:num(o.vins), vin_images:num(o.vin_images)||0,
+  vin_days:num(o.vin_days)||0, vin_last_date:o.vin_last_date||"",
+  vin_month_repaired:num(o.vin_month_repaired)||0,
   acc_rows:num(o.acc_rows)||0, acc_images:num(o.acc_images), true_accuracy:num(o.true_accuracy),
   stage:o.stage||"", version:o.version||"", products:o.products||"",
   arr_rows:num(o.arr_rows)||0,
@@ -2906,12 +2925,33 @@ function coverage(){
       figure.</div>`);
   }
 
-  const dupVin = S.teams.filter(t => t.vi_rows > 1);
-  if (dupVin.length){
-    chips.push(`${dupVin.length} duplicate vin_images keys`);
-    items.push(`<div class="cov-item"><b>${dupVin.length} team-months appear more than once in
-      vin_images.</b> The duplicates are summed, so vehicle counts for those rooftops may be
-      inflated. vin_images is expected to hold one row per month and team.</div>`);
+  /* vin_images now reports daily, so its freshness can be compared directly with
+     delivery's rather than inferred from an image-count ratio. */
+  const lastVin = new Map(), lastDel = new Map();
+  for (const t of S.teams)
+    if (t.vin_last_date && t.vin_last_date > (lastVin.get(t.month_key) || ""))
+      lastVin.set(t.month_key, t.vin_last_date);
+  for (const d of S.daily)
+    if (d.work_date > (lastDel.get(d.month_key) || "")) lastDel.set(d.month_key, d.work_date);
+  const rawYearBad = S.teams.some(t => t.vin_month_repaired);
+  const behind = rawYearBad ? [] : [...lastDel.entries()]
+    .filter(([m,dd]) => lastVin.has(m) && lastVin.get(m) < dd)
+    .map(([m,dd]) => ({m, vin:lastVin.get(m), del:dd}));
+  if (rawYearBad){
+    chips.push(`vin_images month dates malformed`);
+    items.push(`<div class="cov-item"><b>vin_images.month isn't loading as a month-start date.</b>
+      April 2026 currently arrives as 2026-01-04 — the source writes 01-04-2026 and it is read as
+      4 January, swapping month and day. The dashboard normalises it so the joins work, but the fix
+      belongs in whatever loads this table. Once it writes the first of the month this note
+      disappears on its own.</div>`);
+  }
+  if (behind.length){
+    chips.push(`vin_images ${behind.length > 1 ? "lags" : "lags for " + behind[0].m}`);
+    items.push(`<div class="cov-item"><b>vin_images has not caught up with delivery data.</b>
+      Vehicle counts and anything dividing by them are short for the days in between.
+      <ul><li>${behind.map(b =>
+        `${esc(b.m)} — vin_images to ${esc(b.vin)}, delivery to ${esc(b.del)}`
+      ).join("</li><li>")}</li></ul></div>`);
   }
 
   const halfSynced = S.teams.filter(t => (t.vins || 0) > 0 && !vinUsable(t));
