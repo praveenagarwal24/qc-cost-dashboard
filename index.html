@@ -161,6 +161,9 @@ button[disabled]{opacity:.4;cursor:not-allowed}
   .kpi{border-left:none}
   .kpi:not(:first-child){border-top:1px solid var(--rule-soft)}}
 .kpi.lead .v{font-size:25px}
+.kpi.drillable{cursor:pointer}
+.kpi.drillable:hover{background:var(--hover)}
+.kpi.drillable .eyebrow::after{content:" ›";color:var(--steel-light)}
 .kpi .v{font-family:"IBM Plex Mono",monospace;font-weight:500;font-size:21px;
   letter-spacing:-.01em;font-variant-numeric:tabular-nums;margin-top:4px}
 .kpi .d{font-size:11px;color:var(--steel-light);margin-top:2px}
@@ -529,7 +532,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v48 · 27 Aug 2026";
+const VERSION = "v49 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -1548,6 +1551,8 @@ function render(){
   renderKpis(T, scoped, teams);
   renderTrend(rows, teams, T, accActiveNonProduct());
   renderCohort();
+  document.querySelectorAll(".kpi.drillable").forEach(c =>
+    c.addEventListener("click", () => openDrill(c.dataset.drill, "")));
   document.querySelectorAll(".segrow").forEach(tr =>
     tr.addEventListener("click", () => openDrill("segment", tr.dataset.seg)));
   document.querySelectorAll(".prodrow").forEach(tr =>
@@ -1801,7 +1806,8 @@ function renderKpis(T, scoped, teams){
     ["Cost per VIN", T.costPerVin == null ? "—" : money(T.costPerVin),
       T.costPerVin == null ? "needs VIN counts" : "delivery cost ÷ vehicles"],
     ["Churned cost", money(T.churnedCost),
-      T.churnedCost ? `on churned rooftops · ${pctOf(T.churnedCost)}` : "on churned rooftops"]
+      T.churnedCost ? `on churned rooftops · ${pctOf(T.churnedCost)}` : "on churned rooftops",
+      false, "churn"]
   ];
   const unit = [
     ["Contracted ARR", T.arrMonth ? money(T.arrMonth) : "—",
@@ -1813,7 +1819,8 @@ function renderKpis(T, scoped, teams){
           : `monthly · ${CONFIG.arrCurrency} × ${CONFIG.arrToInr}`, true],
     ["Cost to serve", T.costRatio == null ? "—" : dec(T.costRatio,1) + "%",
       T.costRatio == null ? "needs ARR" : "delivery cost ÷ ARR"],
-    ["ARR coverage", dec(T.arrCoverage,0) + "%", "rooftops with an ARR row"],
+    ["ARR coverage", dec(T.arrCoverage,0) + "%",
+      `rooftops with an ARR row · ${dec(100-T.arrCoverage,0)}% without`, false, "noarr"],
     ["True accuracy", pct(T.accuracy),
       T.perVehicle ? `not reported for ${T.product}`
         : `image-weighted · ${CONFIG.accuracyProduct} only`]
@@ -1841,8 +1848,9 @@ function renderKpis(T, scoped, teams){
     ["Rooftops", int(T.rooftops), "teams served"]
   ];
 
-  const cards = list => list.map(([l,v,d,lead]) =>
-    `<div class="kpi${lead ? " lead" : ""}"><div class="eyebrow">${l}</div>
+  const cards = list => list.map(([l,v,d,lead,drill]) =>
+    `<div class="kpi${lead ? " lead" : ""}${drill ? " drillable" : ""}"`
+    + `${drill ? ` data-drill="${drill}"` : ""}><div class="eyebrow">${l}</div>
      <div class="v">${v}</div><div class="d">${d}</div></div>`).join("");
   el("kpis").innerHTML =
     `<div class="kpi-group"><div class="kpi-label">Cost</div>
@@ -2203,6 +2211,44 @@ const DRILL = {
                  || (r.enterprise||"").toLowerCase().includes(q),
     build: productDrill
   },
+  churn: {
+    eyebrow: "Churned rooftops",
+    cols: [
+      ["enterprise",    "Enterprise",    "text"],
+      ["enterprise_id", "Enterprise ID", "id"],
+      ["rooftop",       "Rooftop",       "text"],
+      ["team_id",       "Team ID",       "id"],
+      ["poc",           "POC",           "text"],
+      ["arrMonth",      "ARR in period", "money"],
+      ["images",        "Images",        "int"],
+      ["cost",          "Delivery cost", "money"],
+      ["cpi",           "Cost / image",  "money"]
+    ],
+    find: "Find rooftop\u2026",
+    match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
+                 || (r.enterprise||"").toLowerCase().includes(q)
+                 || (r.poc||"").toLowerCase().includes(q),
+    build: churnDrill
+  },
+  noarr: {
+    eyebrow: "Rooftops with no ARR row",
+    cols: [
+      ["enterprise",    "Enterprise",    "text"],
+      ["enterprise_id", "Enterprise ID", "id"],
+      ["rooftop",       "Rooftop",       "text"],
+      ["team_id",       "Team ID",       "id"],
+      ["poc",           "POC",           "text"],
+      ["stage",         "Stage",         "text"],
+      ["images",        "Images",        "int"],
+      ["cost",          "Delivery cost", "money"],
+      ["cpi",           "Cost / image",  "money"]
+    ],
+    find: "Find rooftop\u2026",
+    match: (r,q) => (r.rooftop||"").toLowerCase().includes(q)
+                 || (r.enterprise||"").toLowerCase().includes(q)
+                 || (r.poc||"").toLowerCase().includes(q),
+    build: noArrDrill
+  },
   day: {
     eyebrow: "Day",
     cols: [
@@ -2220,6 +2266,30 @@ const DRILL = {
     build: dayDrill
   }
 };
+
+/* Rooftop rows for the card drill-downs. Same aggregation as the segment drill
+   but keyed on whatever predicate the card represents, and carrying POC. */
+function rooftopRows(filterFn, totalLabel){
+  const teams = teamView().filter(filterFn);
+  const m = new Map(), all = blankAgg(totalLabel);
+  for (const t of teams){
+    let x = m.get(t.team_id);
+    if (!x) m.set(t.team_id, x = Object.assign(blankAgg(t.team_id), {
+      enterprise:t.enterprise, enterprise_id:t.enterprise_id,
+      rooftop:t.team_name, team_id:t.team_id, poc:t.poc || "", stage:t.stage || ""
+    }));
+    if (!x.poc && t.poc) x.poc = t.poc;
+    addAgg(x, t); addAgg(all, t);
+  }
+  return { rows:[...m.values()].map(deriveAgg), total:deriveAgg(all), unit:"rooftops" };
+}
+
+function churnDrill(){
+  return rooftopRows(t => t.stage === "Churned", "All churned rooftops");
+}
+function noArrDrill(){
+  return rooftopRows(t => !t.arr_month, "All rooftops without ARR");
+}
 
 function segmentDrill(key){
   const teams = teamView();
@@ -2293,7 +2363,7 @@ function fmtDrill(r, key, kind){
 
 function openDrill(type, key){
   S.drill = { type, key, sortKey:"images", sortDir:-1 };
-  el("drill-eyebrow").textContent = DRILL[type].eyebrow;
+  el("drill-eyebrow").textContent = key ? DRILL[type].eyebrow : "Breakdown";
   el("drill-find").placeholder = DRILL[type].find;
   el("drill-find").value = "";
   renderDrill();
@@ -2317,7 +2387,7 @@ function renderDrill(){
     return (typeof av === "string" ? av.localeCompare(bv) : av - bv) * sortDir;
   });
 
-  el("drill-title").textContent = key;
+  el("drill-title").textContent = key || spec.eyebrow;
   el("drill-sub").textContent = `${int(shown.length)}${q ? " of " + int(rows.length) : ""} ${unit}`
     + (type === "segment"
         ? ` \u00b7 ${int(new Set(rows.map(r => r.enterprise)).size)} enterprises` : "");
