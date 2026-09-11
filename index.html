@@ -114,6 +114,22 @@ button[disabled]{opacity:.4;cursor:not-allowed}
 
 .kpi-group{border-top:1px solid var(--rule-soft)}
 .segwrap{padding:12px var(--pad) var(--pad);overflow-x:auto}
+.cohortwrap{overflow-x:auto}
+.cohort{border-collapse:separate;border-spacing:3px;width:100%;font-size:12px}
+.cohort th{font-family:Inter,sans-serif;font-weight:700;font-size:10px;letter-spacing:.08em;
+  text-transform:uppercase;color:var(--steel-light);text-align:center;padding:0 0 4px;
+  background:none;position:static;cursor:default;border:none;white-space:nowrap}
+.cohort th:first-child{text-align:left}
+.cohort td{padding:9px 10px;text-align:center;white-space:nowrap;border:none;border-radius:3px;
+  font-family:"IBM Plex Mono",monospace;font-variant-numeric:tabular-nums;color:var(--ink)}
+.cohort td:first-child{text-align:left;background:none;font-family:Inter,sans-serif;
+  color:var(--steel);padding-left:0}
+.cohort tr:last-child td{background:none;border-top:1px solid var(--rule);
+  border-radius:0;color:var(--steel);font-weight:500}
+.cohort .cell{position:relative}
+.cohort .muted{color:var(--steel-light)}
+.cohint{padding:10px 0 0;font-size:11px;color:var(--steel-light);
+  font-family:"IBM Plex Mono",monospace}
 .segtab{width:100%;border-collapse:collapse;font-size:13px}
 .segtab th{font-family:Inter,sans-serif;font-weight:700;font-size:10px;
   letter-spacing:.08em;text-transform:uppercase;color:var(--steel-light);text-align:right;
@@ -471,6 +487,21 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div id="kpis"></div>
   </div>
 
+  <div class="panel" id="cohort-panel">
+    <div class="panel-head trend-head-row">
+      <div class="trend-left">
+        <h2>VINs by segment</h2>
+        <span class="status" id="cohort-n"></span>
+      </div>
+      <div class="seg mini" id="cohort-mode">
+        <button data-m="vins" class="on">VINs</button>
+        <button data-m="share">Share of month</button>
+        <button data-m="index">Indexed</button>
+      </div>
+    </div>
+    <div class="panel-body"><div class="cohortwrap" id="cohort"></div></div>
+  </div>
+
   <div class="panel">
     <div class="panel-head trend-head-row">
       <div class="trend-left">
@@ -498,7 +529,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 /* ==========================================================================
    1. CONFIG
    ========================================================================== */
-const VERSION = "v38 · 27 Aug 2026";
+const VERSION = "v39 · 27 Aug 2026";
 
 /* Point this at Spyne's own logo file to replace the placeholder mark.
    Any https URL the browser can reach will do. */
@@ -857,7 +888,7 @@ ORDER BY images DESC`;
 const S = {
   daily:[], teams:[], products:[], trend:[], excluded:[], short:[],
   view:"accounts", sortKey:"cpi", sortDir:-1, drill:null,
-  monthChart:"bar", trendGrain:"day", trendProducts:null
+  monthChart:"bar", trendGrain:"day", trendProducts:null, cohortMode:"vins"
 };
 
 /* Rates always show one decimal so a column reads evenly — Intl drops trailing
@@ -1463,6 +1494,7 @@ function render(){
   renderHero(pms, T, scoped);
   renderKpis(T, scoped, teams);
   renderTrend(rows, teams, T, accActiveNonProduct());
+  renderCohort();
   document.querySelectorAll(".segrow").forEach(tr =>
     tr.addEventListener("click", () => openDrill("segment", tr.dataset.seg)));
   document.querySelectorAll(".prodrow").forEach(tr =>
@@ -2323,6 +2355,89 @@ function renderChips(){
     }));
 }
 
+/* Segment x month grid of vehicle volume. Deliberately ignores the month filter,
+   the way the monthly chart does — a cohort view collapsed to one column tells
+   you nothing. Account and product filters still apply. */
+function renderCohort(){
+  const f = F();
+  const scope = S.teams.filter(r =>
+    (!f.seg   || r.segment === f.seg) &&
+    (!f.dt    || r.dealer_type === f.dt) &&
+    (!f.poc   || r.poc === f.poc) &&
+    (!f.stage || r.stage === f.stage) &&
+    (!f.ver   || r.version === f.ver) &&
+    (!f.prod  || deliveredProducts(r.team_id, null).has(f.prod)) &&
+    (!f.ent   || r.enterprise.toLowerCase() === f.ent) &&
+    (!f.roof  || r.team_name.toLowerCase() === f.roof));
+
+  const pinned = pinSegments(scope);
+  const months = [...new Set(scope.map(t => t.month_key))].filter(Boolean).sort();
+  const grid = new Map();          // segment -> month -> vins
+  for (const t of scope){
+    const seg = segOf(pinned, t);
+    if (!grid.has(seg)) grid.set(seg, new Map());
+    const row = grid.get(seg);
+    row.set(t.month_key, (row.get(t.month_key) || 0) + vinsOf(t));
+  }
+  const segs = [...grid.keys()].sort((a,b) => segRank(a) - segRank(b));
+
+  el("cohort-n").textContent = months.length
+    ? `${segs.length} segments · ${months.length} months`
+      + (f.month ? " · all months" : "") : "";
+  if (!months.length || !segs.length){
+    el("cohort").innerHTML = `<span class="status">No vehicle data in this selection</span>`;
+    return;
+  }
+
+  const colTotal = m => segs.reduce((a,s) => a + (grid.get(s).get(m) || 0), 0);
+  const rowTotal = s => months.reduce((a,m) => a + (grid.get(s).get(m) || 0), 0);
+  const mode = S.cohortMode || "vins";
+
+  /* Shading is relative to the largest cell in the current mode, so a share view
+     and a volume view are each readable on their own scale. */
+  const raw = (s,m) => grid.get(s).get(m) || 0;
+  const value = (s,m) => {
+    if (mode === "share") return colTotal(m) ? raw(s,m)/colTotal(m)*100 : 0;
+    if (mode === "index"){
+      const base = raw(s, months[0]);
+      return base ? raw(s,m)/base*100 : null;
+    }
+    return raw(s,m);
+  };
+  const shown = segs.flatMap(s => months.map(m => value(s,m))).filter(v => v != null);
+  const max = Math.max(...shown, 1);
+  const fmt = v => v == null ? "—"
+    : mode === "share" ? dec(v,1) + "%"
+    : mode === "index" ? dec(v,0)
+    : int(v);
+
+  const cell = (s,m) => {
+    const v = value(s,m);
+    if (v == null || (mode !== "index" && !v))
+      return `<td class="muted">—</td>`;
+    const alpha = (0.08 + 0.72 * Math.min(1, v/max)).toFixed(3);
+    return `<td class="cell" style="background:color-mix(in srgb, var(--accent) `
+      + `${Math.round(alpha*100)}%, transparent)">${fmt(v)}</td>`;
+  };
+
+  el("cohort").innerHTML = `<table class="cohort">
+    <thead><tr><th>Segment</th>${months.map(m =>
+      `<th>${esc(m.slice(2))}</th>`).join("")}<th>Total</th></tr></thead>
+    <tbody>
+      ${segs.map(s => `<tr><td>${esc(s)}</td>`
+        + months.map(m => cell(s,m)).join("")
+        + `<td class="muted">${int(rowTotal(s))}</td></tr>`).join("")}
+      <tr><td>All segments</td>${months.map(m =>
+        `<td>${int(colTotal(m))}</td>`).join("")}<td>${int(
+        segs.reduce((a,s) => a + rowTotal(s), 0))}</td></tr>
+    </tbody></table>
+    <div class="cohint">${
+      mode === "share" ? "Each cell is that segment's share of the month's vehicles — reads the mix, not the volume."
+      : mode === "index" ? `Indexed to ${esc(months[0])} = 100, so rows are comparable regardless of size.`
+      : "Vehicles processed, from vin_images. Shading is relative to the largest cell."
+    } Latest month is partial, so its column is lower by period, not by performance.</div>`;
+}
+
 function renderTrend(rows, teams, T, scoped){
   const svg = el("chart-trend");
   renderChips();
@@ -2875,6 +2990,14 @@ document.querySelectorAll("#month-mode button").forEach(b =>
     document.querySelectorAll("#month-mode button").forEach(x => x.classList.remove("on"));
     b.classList.add("on");
     S.monthChart = b.dataset.m;
+    render();
+  }));
+
+document.querySelectorAll("#cohort-mode button").forEach(b =>
+  b.addEventListener("click", () => {
+    document.querySelectorAll("#cohort-mode button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    S.cohortMode = b.dataset.m;
     render();
   }));
 
