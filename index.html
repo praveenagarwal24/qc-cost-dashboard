@@ -348,6 +348,12 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
 .whoami .em{font-family:"IBM Plex Mono",monospace}
 .whoami button{background:transparent;color:var(--steel);border-color:var(--rule);
   padding:5px 9px;font-size:10px}
+/* ---- Spyne Board: Leadership / Day-to-day view toggle ---- */
+.viewtabs{display:flex;background:var(--tagbg);border-radius:10px;padding:3px;align-self:center;order:2}
+.viewtabs button{border:0;background:transparent;color:var(--steel);font:inherit;font-weight:600;
+  font-size:13px;padding:7px 18px;border-radius:7px;cursor:pointer;transition:.15s}
+.viewtabs button.on{background:var(--card);color:var(--accent);box-shadow:0 1px 5px rgba(39,16,66,.14)}
+.v-hidden{display:none !important}
 </style>
 </head>
 <body>
@@ -413,11 +419,15 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div class="brand">
       <div class="mark" id="mark"><i></i><i></i><i></i><i></i></div>
       <div>
-        <div class="eyebrow">Spyne · Delivery Operations</div>
-        <h1>QC Cost, Output &amp; Accuracy</h1>
+        <div class="eyebrow">Spyne · Board</div>
+        <h1>Delivery P&amp;L — Cost, Output &amp; Accuracy</h1>
       <div class="sub">Salary on email + month · AI accuracy on team + month ·
         <span class="ver" id="ver"></span></div>
       </div>
+    </div>
+    <div class="viewtabs">
+      <button id="vt-exec" class="on">Leadership</button>
+      <button id="vt-ops">Day-to-day</button>
     </div>
     <div class="actions">
       <span class="excl-chip" id="excl-chip" style="display:none"></span>
@@ -475,7 +485,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     </div>
   </details>
 
-  <div class="panel hero-panel">
+  <div class="panel hero-panel" data-view="exec">
     <div id="scope-note"></div>
     <div class="hero">
       <div class="hero-stats">
@@ -504,7 +514,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div id="kpis"></div>
   </div>
 
-  <div class="panel" id="cohort-panel">
+  <div class="panel" id="cohort-panel" data-view="exec">
     <div class="panel-head trend-head-row">
       <div class="trend-left">
         <h2>VINs by segment</h2>
@@ -519,7 +529,7 @@ textarea{width:100%;min-height:200px;font-family:"IBM Plex Mono",monospace;font-
     <div class="panel-body"><div class="cohortwrap" id="cohort"></div></div>
   </div>
 
-  <div class="panel">
+  <div class="panel" data-view="ops">
     <div class="panel-head trend-head-row">
       <div class="trend-left">
         <h2 id="trend-title">Output and rate</h2>
@@ -3556,6 +3566,29 @@ el("btn-out").addEventListener("click", () => signOut());
   }
 })();
 
+</script>
+<script>
+/* Spyne Board — Leadership / Day-to-day view toggle.
+   Non-invasive: only shows/hides panels tagged with data-view; all data,
+   queries and charts are untouched. Elements with no data-view (filters,
+   alerts, coverage, SQL) stay visible in both views. */
+(function(){
+  function setView(v){
+    document.querySelectorAll('[data-view]').forEach(function(p){
+      p.classList.toggle('v-hidden', p.getAttribute('data-view') !== v);
+    });
+    var e = document.getElementById('vt-exec'), o = document.getElementById('vt-ops');
+    if (e) e.classList.toggle('on', v === 'exec');
+    if (o) o.classList.toggle('on', v === 'ops');
+    try { localStorage.setItem('board-view', v); } catch(_){}
+  }
+  var saved = 'exec';
+  try { saved = localStorage.getItem('board-view') || 'exec'; } catch(_){}
+  var e = document.getElementById('vt-exec'), o = document.getElementById('vt-ops');
+  if (e) e.addEventListener('click', function(){ setView('exec'); });
+  if (o) o.addEventListener('click', function(){ setView('ops'); });
+  setView(saved);
+})();
 </script>
 </body>
 </html>
