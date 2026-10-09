@@ -1835,10 +1835,7 @@ function renderMonths(T){
     return "var(--cost-mid)";
   };
   let s = "";
-  // Right-side scale: only the baseline (0) marker. Top/mid labels removed per request;
-  // every bar already carries its own value label.
-  s += `<text x="${W}" y="${padT+plotH-4}" text-anchor="end" font-family="IBM Plex Mono" `
-     + `font-size="9" fill="var(--steel-light)">${money(0)}</text>`;
+  // Right-side scale removed entirely — every bar carries its own value label.
 
   if (mode === "bar"){
     const gw = Math.min(48, step - 14);
@@ -1909,8 +1906,8 @@ function renderMonths(T){
   s += `<rect x="0" y="7" width="7" height="6" rx="1" fill="var(--steel-light)" opacity=".85"/>`
      + `<text x="11" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / image (left)</text>`;
   if (hasVin)
-    s += `<rect x="112" y="4" width="7" height="9" rx="1" fill="var(--steel)" opacity=".85"/>`
-       + `<text x="123" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN (right)</text>`;
+    s += `<rect x="158" y="4" width="7" height="9" rx="1" fill="var(--steel)" opacity=".85"/>`
+       + `<text x="169" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN (right)</text>`;
   s += `<text x="${W}" y="12" text-anchor="end" font-family="IBM Plex Mono" font-size="10" `
      + `fill="var(--steel-light)">vs last month: `
      + `<tspan fill="var(--cost-low)">cheaper</tspan> · `
