@@ -1828,8 +1828,8 @@ function renderMonths(T){
   let s = "";
   for (let i=0; i<=2; i++){
     const yy = padT + plotH*i/2;
-    s += `<line x1="0" y1="${yy}" x2="${W}" y2="${yy}" stroke="var(--rule-soft)"/>`
-       + `<text x="${W}" y="${yy-4}" text-anchor="end" font-family="IBM Plex Mono" `
+    // gridlines removed (except the base line drawn below) — keep scale labels only
+    s += `<text x="${W}" y="${yy-4}" text-anchor="end" font-family="IBM Plex Mono" `
        + `font-size="9" fill="var(--steel-light)">${money(top*(1-i/2))}</text>`;
   }
 
