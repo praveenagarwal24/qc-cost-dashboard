@@ -1825,6 +1825,15 @@ function renderMonths(T){
   const dim = d => sel && sel !== d.key;
 
   const cpiCol = d => costColor(d.cpi/(T.blended||1));
+  // Colour a bar by its move vs the PREVIOUS month: cheaper = green (good),
+  // pricier = red (bad), ~flat or no prior month = amber / neutral.
+  const momCol = (cur, prev) => {
+    if (cur == null || prev == null || !isFinite(prev) || prev === 0) return "var(--steel)";
+    const chg = (cur - prev) / prev;
+    if (chg <= -0.02) return "var(--cost-low)";
+    if (chg >=  0.02) return "var(--cost-high)";
+    return "var(--cost-mid)";
+  };
   let s = "";
   for (let i=0; i<=2; i++){
     const yy = padT + plotH*i/2;
@@ -1843,7 +1852,7 @@ function renderMonths(T){
       s += `<g><title>${d.key}\n${money(d.cpi)} per image`
         + `${d.cpv != null ? "\n" + money(d.cpv) + " per VIN" : ""}</title>`
         + `<rect x="${xCpi(i)}" y="${y(d.cpi)}" width="${bw}" `
-        + `height="${padT+plotH-y(d.cpi)}" rx="2" fill="${cpiCol(d)}" `
+        + `height="${padT+plotH-y(d.cpi)}" rx="2" fill="${momCol(d.cpi, i>0?pts[i-1].cpi:null)}" `
         + `opacity="${dim(d)?.22:.92}"/>`
         + `<text x="${xCpi(i)+bw/2}" y="${y(d.cpi)-6}" text-anchor="middle" `
         + `font-family="IBM Plex Mono" font-size="10" `
@@ -1856,10 +1865,10 @@ function renderMonths(T){
                    + "\nvehicle count is understated and this rate reads too high." : ""}</title>`
           + `<rect x="${xCpv(i)}" y="${y(d.cpv)}" width="${bw}" `
           + `height="${padT+plotH-y(d.cpv)}" rx="2" `
-          + `fill="${lag ? "none" : "var(--steel)"}" `
+          + `fill="${lag ? "none" : momCol(d.cpv, i>0?pts[i-1].cpv:null)}" `
           + `stroke="var(--steel)" stroke-width="${lag ? 1.4 : 0}" `
           + `${lag ? 'stroke-dasharray="3 2" ' : ""}`
-          + `opacity="${dim(d)?.18:(lag?.7:.55)}"/>`
+          + `opacity="${dim(d)?.18:(lag?.7:.78)}"/>`
           + `<text x="${xCpv(i)+bw/2}" y="${y(d.cpv)-6}" text-anchor="middle" `
           + `font-family="IBM Plex Mono" font-size="10" `
           + `fill="${dim(d)?"var(--steel-light)":"var(--steel)"}">`
@@ -1897,12 +1906,14 @@ function renderMonths(T){
     `<text x="${cx(i)}" y="${H-10}" text-anchor="middle" font-family="IBM Plex Mono" `
     + `font-size="10" fill="var(--steel-light)">${d.key.slice(2)}</text>`).join("");
 
-  s += `<rect x="0" y="4" width="11" height="9" rx="2" fill="${cpiCol(pts[pts.length-1])}" opacity=".9"/>`
-     + `<text x="16" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / image</text>`;
+  s += `<text x="0" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">vs last month</text>`
+     + `<rect x="82" y="4" width="11" height="9" rx="2" fill="var(--cost-low)" opacity=".9"/>`
+     + `<text x="97" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cheaper</text>`
+     + `<rect x="152" y="4" width="11" height="9" rx="2" fill="var(--cost-high)" opacity=".9"/>`
+     + `<text x="167" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">pricier</text>`;
   if (hasVin)
-    s += `<rect x="98" y="4" width="11" height="9" rx="2" fill="var(--steel)" opacity=".55"/>`
-       + `<text x="114" y="12" font-family="IBM Plex Mono" font-size="10" fill="var(--steel-light)">cost / VIN`
-       + `</text>`;
+    s += `<text x="${W}" y="12" text-anchor="end" font-family="IBM Plex Mono" font-size="10" `
+       + `fill="var(--steel-light)">left = /image · right = /VIN</text>`;
 
   const lagged = pts.filter(d => d.cpv != null && vinLagging(d.key)).map(d => d.key);
   if (lagged.length)
